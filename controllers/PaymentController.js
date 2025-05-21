@@ -319,7 +319,6 @@ const paymentController = {
 
       await transaction.commit();
 
-      // Envoyer une notification si la souscription est active
       if (subscription.status === 'active') {
         try {
           const plan = await Plan.findByPk(subscription.plan_id);

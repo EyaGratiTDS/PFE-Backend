@@ -3,295 +3,223 @@ const axios = require('axios');
 const UAParser = require('ua-parser-js');
 const ActivityLog = require('../models/ActivityLog');
 const User = require('../models/User');
-const os = require('os'); // Module intégré pour obtenir des informations sur le système
 
-// Fonction pour récupérer l'adresse IP externe de la machine
-const getPublicIp = async () => {
-  try {
-    // Utiliser un service qui renvoie votre IP publique
-    const response = await axios.get('https://api.ipify.org?format=json', {
-      timeout: 3000
-    });
-    return response.data.ip;
-  } catch (error) {
-    console.error('Erreur lors de la récupération de l\'IP publique:', error.message);
-    // Fallback - essayer une autre API
+// Helpers constants
+const IP_API_PROVIDERS = [
+  'https://api.ipify.org?format=json',
+  'https://api.ip.sb/ip'
+];
+
+const IP_GEOLOCATION_API = 'http://ip-api.com/json/{ip}?fields=status,country,city,query';
+
+// Helper functions
+const fetchWithFallback = async (urls, options) => {
+  for (const url of urls) {
     try {
-      const backupResponse = await axios.get('https://api.ip.sb/ip', {
-        timeout: 3000
-      });
-      return backupResponse.data.trim();
-    } catch (fallbackError) {
-      console.error('Erreur avec l\'API de fallback:', fallbackError.message);
-      return null;
+      const response = await axios.get(url, options);
+      return url.includes('ipify') ? response.data.ip : response.data.trim();
+    } catch (error) {
+      console.error(`API request failed for ${url}:`, error.message);
     }
   }
+  return null;
 };
 
-const getLocationInfo = async (ipAddress) => {
-  try {
-    // Si adresse locale, récupérer l'IP publique de la machine
-    if (ipAddress === '::1' || ipAddress === '127.0.0.1') {
-      const publicIp = await getPublicIp();
-      
-      if (publicIp) {
-        // Utiliser l'IP publique pour obtenir les informations de localisation
-        const response = await axios.get(`http://ip-api.com/json/${publicIp}?fields=status,country,city,query`, {
-          timeout: 5000
-        });
-        
-        if (response.data && response.data.status === 'success') {
-          return {
-            country: response.data.country,
-            city: response.data.city,
-            ip: publicIp // Stocker l'IP publique
-          };
-        }
-      }
-      
-      // Si impossible d'obtenir l'IP publique ou les infos de localisation
-      return { 
-        country: 'Localhost', 
-        city: 'Local',
-        ip: ipAddress 
-      };
-    }
-    
-    const cleanIp = ipAddress.split(',')[0].trim();
+const cleanIpAddress = (rawIp) => {
+  if (!rawIp) return null;
+  
+  return rawIp
+    .split(',')[0]
+    .trim()
+    .replace('::ffff:', '')
+    .replace('::1', '127.0.0.1');
+};
 
-    const response = await axios.get(`http://ip-api.com/json/${cleanIp}?fields=status,country,city,query`, {
-      timeout: 5000
-    });
-    
-    if (response.data && response.data.status === 'success') {
-      return {
-        country: response.data.country,
-        city: response.data.city,
-        ip: response.data.query || cleanIp 
-      };
-    }
-    
-    return {
+const getLocationData = async (ip) => {
+  if (!ip || ip === '127.0.0.1') {
+    const publicIp = await fetchWithFallback(IP_API_PROVIDERS, { timeout: 3000 });
+    ip = publicIp || ip;
+  }
+
+  try {
+    const { data } = await axios.get(
+      IP_GEOLOCATION_API.replace('{ip}', ip),
+      { timeout: 5000 }
+    );
+
+    return data?.status === 'success' ? {
+      country: data.country,
+      city: data.city,
+      ip: data.query || ip
+    } : {
       country: 'Unknown',
       city: 'Unknown',
-      ip: cleanIp
+      ip
     };
   } catch (error) {
-    console.error('Error getting location info:', error.message);
-    return {
-      country: 'Unknown',
-      city: 'Unknown',
-      ip: ipAddress
-    };
+    console.error('Geolocation API error:', error.message);
+    return { country: 'Unknown', city: 'Unknown', ip };
   }
 };
 
-const parseUserAgent = (userAgent) => {
-  const parser = new UAParser(userAgent);
-  const result = parser.getResult();
-  
+const parseUserAgent = (uaHeader) => {
+  const { device, os, browser } = new UAParser(uaHeader).getResult();
   return {
-    deviceType: result.device.type || 'desktop',
-    os: result.os.name || 'Unknown',
-    browser: result.browser.name || 'Unknown'
+    deviceType: device.type || 'desktop',
+    os: os.name || 'Unknown',
+    browser: browser.name || 'Unknown'
   };
 };
 
+// Core functionality
 const logActivity = async (userId, activityType, req = {}) => {
   try {
-    const rawIp = req.headers['x-forwarded-for'] || 
-                 req.headers['x-real-ip'] || 
-                 req.connection.remoteAddress || 
-                 req.socket.remoteAddress || 
-                 (req.connection.socket ? req.connection.socket.remoteAddress : null);
+    const rawIp = ['x-forwarded-for', 'x-real-ip']
+      .map(header => req.headers[header])
+      .find(Boolean) || req.socket?.remoteAddress;
 
-    if (!rawIp) {
-      console.error('No IP address detected');
+    const ipAddress = cleanIpAddress(rawIp);
+    if (!ipAddress) {
+      console.error('No valid IP detected');
       return false;
     }
 
-    let cleanedIp = rawIp.split(',')[0].trim();
-    
-    if (cleanedIp === '::1') {
-      cleanedIp = '127.0.0.1';
-    }
-    
-    if (cleanedIp.includes('::ffff:')) {
-      cleanedIp = cleanedIp.replace('::ffff:', '');
-    }
+    const [locationInfo, userAgentInfo] = await Promise.all([
+      getLocationData(ipAddress),
+      parseUserAgent(req.headers['user-agent'] || 'Unknown')
+    ]);
 
-    const locationInfo = await getLocationInfo(cleanedIp);
-    const userAgent = req.headers['user-agent'] || 'Unknown';
-    const deviceInfo = parseUserAgent(userAgent);
-
-    const logData = {
+    await ActivityLog.create({
       userId,
       activityType,
-      ipAddress: locationInfo.ip || cleanedIp, 
-      userAgent,
-      country: locationInfo.country,
-      city: locationInfo.city,
-      deviceType: deviceInfo.deviceType,
-      os: deviceInfo.os,
-      browser: deviceInfo.browser,
-    };
+      ipAddress: locationInfo.ip,
+      ...locationInfo,
+      ...userAgentInfo,
+      userAgent: req.headers['user-agent']
+    });
 
-    await ActivityLog.create(logData);
     return true;
   } catch (error) {
-    console.error('Error logging activity:', error);
+    console.error('Activity logging failed:', error);
     return false;
   }
 };
 
+// Activity handlers
+const buildWhereClause = (userId, query) => {
+  const { type, days, deviceType, browser } = query;
+  const where = { userId };
+  
+  if (type) where.activityType = type;
+  if (days) where.created_at = { [Op.gte]: new Date(Date.now() - days * 86400000) };
+  if (deviceType) where.deviceType = deviceType;
+  if (browser) where.browser = browser;
+
+  return where;
+};
+
+const handleActivityResponse = (res, data) => res.json({ success: true, ...data });
+
+const handleActivityError = (res, context) => (error) => {
+  console.error(`Activity error (${context}):`, error);
+  res.status(500).json({ success: false, message: 'Internal server error' });
+};
+
+// Controllers
 const getUserActivities = async (req, res) => {
   try {
-    const userId = req.user.isAdmin && req.query.userId 
-      ? req.query.userId 
-      : req.user.id;
+    const userId = req.user.isAdmin && req.query.userId ? req.query.userId : req.user.id;
+    const { limit = 20, offset = 0 } = req.query;
     
-    const { 
-      limit = 20, 
-      offset = 0, 
-      type, 
-      days, 
-      deviceType,
-      browser 
-    } = req.query;
-    
-    const where = { userId };
-    
-    if (type) where.activityType = type;
-    if (days) where.created_at = { [Op.gte]: new Date(new Date() - days * 24 * 60 * 60 * 1000) };
-    if (deviceType) where.deviceType = deviceType;
-    if (browser) where.browser = browser;
-    
-    const { count, rows: activities } = await ActivityLog.findAndCountAll({
-      where,
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [['created_at', 'DESC']],
+    const { count, rows } = await ActivityLog.findAndCountAll({
+      where: buildWhereClause(userId, req.query),
+      limit: Number(limit),
+      offset: Number(offset),
+      order: [['created_at', 'DESC']]
     });
 
-    res.json({
-      success: true,
-      data: formatActivityLogs(activities),
+    handleActivityResponse(res, {
+      data: formatActivityLogs(rows),
       total: count,
-      limit: parseInt(limit),
-      offset: parseInt(offset)
+      limit: Number(limit),
+      offset: Number(offset)
     });
   } catch (error) {
-    console.error('Error getting user activities:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Internal server error' 
-    });
+    handleActivityError(res, 'fetch activities')(error);
   }
 };
 
 const getFailedAttempts = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const hours = parseInt(req.query.hours) || 1;
-    
     const count = await ActivityLog.count({
       where: {
-        userId,
+        userId: req.user.id,
         activityType: 'login_failed',
-        created_at: {
-          [Op.gte]: new Date(new Date() - hours * 60 * 60 * 1000)
-        }
+        created_at: { [Op.gte]: new Date(Date.now() - (req.query.hours || 1) * 3600000) }
       }
     });
-    
-    res.json({
-      success: true,
-      count,
-      hours
-    });
+
+    handleActivityResponse(res, { count });
   } catch (error) {
-    console.error('Error getting failed attempts:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Internal server error' 
-    });
+    handleActivityError(res, 'fetch failed attempts')(error);
   }
 };
 
 const getRecentActivities = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const limit = parseInt(req.query.limit) || 5;
-    
     const activities = await ActivityLog.findAll({
-      where: { userId },
-      limit,
+      where: { userId: req.user.id },
+      limit: Math.min(Number(req.query.limit) || 5, 100),
       order: [['created_at', 'DESC']],
       attributes: ['id', 'activityType', 'created_at']
     });
-    
-    res.json({
-      success: true,
-      data: activities
-    });
+
+    handleActivityResponse(res, { data: activities });
   } catch (error) {
-    console.error('Error getting recent activities:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Internal server error' 
-    });
+    handleActivityError(res, 'fetch recent activities')(error);
   }
 };
 
 const getActivityDetails = async (req, res) => {
   try {
-    const { id } = req.params;
-    const userId = req.user.id;
-    
     const activity = await ActivityLog.findOne({
-      where: { id, userId },
+      where: { id: req.params.id, userId: req.user.id },
       include: [{
         model: User,
         as: 'user',
         attributes: ['id', 'name', 'email']
       }]
     });
-    
-    if (!activity) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Activity not found' 
-      });
-    }
-    
-    res.json({
-      success: true,
-      data: formatActivityLogs([activity])[0]
-    });
+
+    activity 
+      ? handleActivityResponse(res, { data: formatActivityLogs([activity])[0] })
+      : res.status(404).json({ success: false, message: 'Activity not found' });
   } catch (error) {
-    console.error('Error getting activity details:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Internal server error' 
-    });
+    handleActivityError(res, 'fetch activity details')(error);
   }
 };
 
-const formatActivityLogs = (logs) => {
-  return logs.map(log => ({
-    id: log.id,
-    activityType: log.activityType,
-    ipAddress: log.ipAddress,
-    location: log.city ? `${log.city}, ${log.country}` : 'Unknown',
-    device: `${log.deviceType} (${log.os}, ${log.browser})`,
-    createdAt: log.created_at,
-    user: log.user ? {
-      id: log.user.id,
-      name: log.user.name,
-      email: log.user.email
-    } : null,
-  }));
-};
+// Formatting
+const formatActivityLogs = (logs) => logs.map(({ 
+  id, 
+  activityType, 
+  ipAddress, 
+  city, 
+  country, 
+  deviceType, 
+  os, 
+  browser, 
+  created_at, 
+  user 
+}) => ({
+  id,
+  activityType,
+  ipAddress,
+  location: city ? `${city}, ${country}` : 'Unknown',
+  device: `${deviceType} (${os}, ${browser})`,
+  createdAt: created_at,
+  user: user ? { id: user.id, name: user.name, email: user.email } : null
+}));
 
 module.exports = {
   logActivity,

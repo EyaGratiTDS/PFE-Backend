@@ -405,6 +405,11 @@ const getUserByEmail = (email) => {
   
       user.password = newPassword;
       await user.save();
+      try {
+        await notificationController.sendPasswordChangeNotification(user.id);
+      } catch (notificationError) {
+        console.error('Failed to send password change notification:', notificationError);
+      }
       await activityLogController.logActivity(user.id, 'password_changed_success', req);
       res.json({ 
         success: true,

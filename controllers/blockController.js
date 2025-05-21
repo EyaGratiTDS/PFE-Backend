@@ -1,19 +1,42 @@
 const Block = require("../models/Block");
-const VCard = require("../models/Vcard"); 
-const { Op } = require("sequelize"); 
+const VCard = require("../models/Vcard");
+const { Op } = require("sequelize");
 const { getActiveBlockLimit } = require('../middleware/planLimiter');
 
-const VALID_BLOCK_TYPES = [
+const VALID_BLOCK_TYPES = new Set([
   'Link', 'Email', 'Address', 'Phone', 'Facebook',
   'Twitter', 'Instagram', 'Youtube', 'Whatsapp',
   'Tiktok', 'Telegram', 'Spotify', 'Pinterest',
   'Linkedin', 'Snapchat', 'Twitch', 'Discord',
   'Messenger', 'Reddit', 'GitHub'
-];
+]);
+
+const SEARCH_CONFIG = {
+  limit: 10,
+  order: [['createdAt', 'DESC']]
+};
+
+const ERROR_RESPONSES = {
+  invalidType: { error: 'Invalid block type' },
+  missingParams: { error: 'The vcardId and q (query) parameters are required' },
+  missingVcardId: { error: 'vcardId is required' },
+  notFound: { error: 'Block not found' },
+  serverError: (details) => ({ error: 'Server error', ...(details && { details }) })
+};
+
+const sendErrorResponse = (res, status, message, error = null) => {
+  if (error) console.error(message, error);
+  res.status(status).json({ ...message, ...(error && process.env.NODE_ENV === 'development' && { details: error.message }) });
+};
+
+const validateQueryParams = (params) => (req, res, next) => {
+  if (params.every(p => req.query[p])) return next();
+  sendErrorResponse(res, 400, ERROR_RESPONSES.missingParams);
+};
 
 const validateBlockType = (req, res, next) => {
-  if (req.body.type_block && !VALID_BLOCK_TYPES.includes(req.body.type_block)) {
-    return res.status(400).json({ error: 'Invalid block type' });
+  if (req.body.type_block && !VALID_BLOCK_TYPES.has(req.body.type_block)) {
+    return sendErrorResponse(res, 400, ERROR_RESPONSES.invalidType);
   }
   next();
 };
@@ -21,73 +44,43 @@ const validateBlockType = (req, res, next) => {
 const searchBlocks = async (req, res) => {
   try {
     const { vcardId, q } = req.query;
-    
-    if (!vcardId || !q) {
-      return res.status(400).json({ 
-        error: 'The vcardId and q (query) parameters are required' 
-      });
-    }
+    const searchCondition = { 
+      [Op.or]: ['name', 'type_block', 'description'].map(field => ({
+        [field]: { [Op.iLike]: `%${q}%` }
+      }))
+    };
 
     const blocks = await Block.findAll({
-      where: {
-        vcardId,
-        [Op.or]: [
-          { name: { [Op.like]: `%${q}%` } },
-          { type_block: { [Op.like]: `%${q}%` } },
-          { description: { [Op.like]: `%${q}%` } }
-        ]
-      },
-      order: [['createdAt', 'DESC']],
-      limit: 10 
+      where: { vcardId, ...searchCondition },
+      ...SEARCH_CONFIG
     });
 
     res.json(blocks);
   } catch (error) {
-    console.error('Error searching for blocks:', error);
-    res.status(500).json({ 
-      error: 'Server error',
-      details: error.message 
-    });
+    sendErrorResponse(res, 500, ERROR_RESPONSES.serverError(), error);
   }
 };
 
 const createBlock = async (req, res) => {
   try {
-    const { type_block, name, description, status, vcardId } = req.body;
+    const { status = true, ...blockData } = req.body;
+    const newBlock = await Block.create({ ...blockData, status });
     
-    const newBlock = await Block.create({
-      type_block,
-      name,
-      description,
-      status: status !== undefined ? status : true, 
-      vcardId
-    });
-
     res.status(201).json(newBlock);
   } catch (error) {
-    console.error('Error creating block:', error);
-    res.status(500).json({ 
-      error: 'Server error',
-      details: error.message 
-    });
+    sendErrorResponse(res, 500, ERROR_RESPONSES.serverError(), error);
   }
 };
 
 const getBlocksByVcardId = async (req, res) => {
   try {
     const { vcardId } = req.query;
-    const userId = req.user.id;
+    if (!vcardId) return sendErrorResponse(res, 400, ERROR_RESPONSES.missingVcardId);
 
-    if (!vcardId) {
-      return res.status(400).json({ error: 'vcardId is required' });
-    }
-
-    const blocks = await Block.findAll({ 
-      where: { vcardId },
-      order: [['createdAt', 'ASC']] 
-    });
-
-    const maxActive = await getActiveBlockLimit(userId, vcardId);
+    const [blocks, maxActive] = await Promise.all([
+      Block.findAll({ where: { vcardId }, order: [['createdAt', 'ASC']] }),
+      getActiveBlockLimit(req.user.id, vcardId)
+    ]);
 
     const result = blocks.map((block, index) => ({
       ...block.get({ plain: true }),
@@ -96,68 +89,55 @@ const getBlocksByVcardId = async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.error('Error fetching blocks:', error);
-    res.status(500).json({ error: 'Server error' });
+    sendErrorResponse(res, 500, ERROR_RESPONSES.serverError(), error);
   }
 };
 
 const getBlockById = async (req, res) => {
   try {
     const block = await Block.findByPk(req.params.id, {
-      include: [{ model: VCard, as: 'vcard' }], 
+      include: { model: VCard, as: 'vcard', attributes: ['id', 'name'] }
     });
 
-    if (!block) {
-      return res.status(404).json({ error: 'Block not found' });
-    }
-
-    res.json(block);
+    block ? res.json(block) : sendErrorResponse(res, 404, ERROR_RESPONSES.notFound);
   } catch (error) {
-    console.error('Error retrieving block:', error);
-    res.status(500).json({ error: 'Server error' });
+    sendErrorResponse(res, 500, ERROR_RESPONSES.serverError(), error);
   }
 };
 
 const updateBlock = async (req, res) => {
   try {
     const block = await Block.findByPk(req.params.id);
-    if (!block) {
-      return res.status(404).json({ error: 'Block not found' });
-    }
+    if (!block) return sendErrorResponse(res, 404, ERROR_RESPONSES.notFound);
 
     const { vcardId, ...updateData } = req.body;
-
     await block.update(updateData);
-
+    
     res.json(block);
   } catch (error) {
-    console.error('Error updating block:', error);
-    res.status(500).json({ error: 'Server error' });
+    sendErrorResponse(res, 500, ERROR_RESPONSES.serverError(), error);
   }
 };
 
 const deleteBlock = async (req, res) => {
   try {
     const block = await Block.findByPk(req.params.id);
-    if (!block) {
-      return res.status(404).json({ error: 'Block not found' });
-    }
+    if (!block) return sendErrorResponse(res, 404, ERROR_RESPONSES.notFound);
 
     await block.destroy();
-    res.status(204).end(); 
+    res.status(204).end();
   } catch (error) {
-    console.error('Error deleting block:', error);
-    res.status(500).json({ error: 'Server error' });
+    sendErrorResponse(res, 500, ERROR_RESPONSES.serverError(), error);
   }
 };
 
 module.exports = {
   validateBlockType,
-  searchBlocks,
+  searchBlocks: [validateQueryParams(['vcardId', 'q']), searchBlocks],
   createBlock,
-  getBlocksByVcardId,
+  getBlocksByVcardId: [validateQueryParams(['vcardId']), getBlocksByVcardId],
   getBlockById,
   updateBlock,
   deleteBlock,
-  VALID_BLOCK_TYPES
+  VALID_BLOCK_TYPES: Array.from(VALID_BLOCK_TYPES)
 };

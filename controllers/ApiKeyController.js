@@ -3,180 +3,143 @@ const crypto = require('crypto');
 const { Op } = require('sequelize');
 const { getActiveApiKeyLimit } = require('../middleware/planLimiter');
 
-const generateApiKey = () => {
-  return crypto.randomBytes(32).toString('hex');
+const CRYPTO_CONFIG = {
+  keyLength: 32,
+  encoding: 'hex',
+  hashAlgorithm: 'sha256'
 };
 
-const hashApiKey = (key) => {
-  return crypto.createHash('sha256').update(key).digest('hex');
+const RESPONSE_MESSAGES = {
+  created: 'API key created successfully',
+  notFound: 'API key not found',
+  deleted: 'API key deleted successfully',
+  authRequired: 'API key is required',
+  invalidKey: 'Invalid or expired API key',
+  insufficientScope: 'Insufficient scope. Required:'
 };
 
-const validateScopes = (scopes) => {
-  if (!scopes || scopes.length === 0) return ['*'];
-  return Array.isArray(scopes) ? scopes : [scopes];
+const generateSecureKey = () => crypto.randomBytes(CRYPTO_CONFIG.keyLength).toString(CRYPTO_CONFIG.encoding);
+const hashKey = key => crypto.createHash(CRYPTO_CONFIG.hashAlgorithm).update(key).digest(CRYPTO_CONFIG.encoding);
+const normalizeScopes = scopes => (scopes?.length ? [].concat(scopes) : ['*']);
+
+const handleResponse = (res, status, data) => res.status(status).json({ success: status < 400, ...data });
+const handleError = (res, context, error) => {
+  console.error(`${context} error:`, error);
+  return handleResponse(res, 500, {
+    message: `Failed to ${context}`,
+    error: process.env.NODE_ENV === 'development' ? error.message : undefined
+  });
 };
 
 const createApiKey = async (req, res) => {
   try {
     const { name, expiresAt, scopes } = req.body;
-    const userId = req.user.id;
-
-    const rawKey = generateApiKey();
-    const prefix = rawKey.substring(0, 8);
-    const hashedKey = hashApiKey(rawKey);
-
+    const rawKey = generateSecureKey();
+    
     const apiKey = await ApiKey.create({
       name,
-      userId,
-      key: hashedKey,
-      prefix,
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
-      scopes: validateScopes(scopes),
+      userId: req.user.id,
+      key: hashKey(rawKey),
+      prefix: rawKey.slice(0, 8),
+      expiresAt: expiresAt && new Date(expiresAt),
+      scopes: normalizeScopes(scopes),
       isActive: true
     });
 
-    return res.status(201).json({
-      success: true,
-      message: 'API key created successfully',
+    return handleResponse(res, 201, {
+      message: RESPONSE_MESSAGES.created,
       data: {
-        id: apiKey.id,
-        name: apiKey.name,
+        ...apiKey.get({ plain: true }),
         key: rawKey,
-        prefix: apiKey.prefix,
-        scopes: apiKey.scopes,
-        expiresAt: apiKey.expiresAt,
         createdAt: apiKey.created_at
       }
     });
   } catch (error) {
-    console.error('Create API key error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to create API key',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return handleError(res, 'create API key', error);
   }
 };
 
 const listApiKeys = async (req, res) => {
   try {
-    const userId = req.user.id;
-
-    const max = await getActiveApiKeyLimit(userId);
-
-    const apiKeys = await ApiKey.findAll({
-      where: { userId },
-      attributes: ['id', 'name', 'prefix', 'scopes', 'expiresAt', 'isActive', 'lastUsedAt', 'created_at'],
-      order: [['created_at', 'ASC']]
-    });
+    const [maxLimit, apiKeys] = await Promise.all([
+      getActiveApiKeyLimit(req.user.id),
+      ApiKey.findAll({
+        where: { userId: req.user.id },
+        attributes: ['id', 'name', 'prefix', 'scopes', 'expiresAt', 'isActive', 'lastUsedAt', 'created_at'],
+        order: [['created_at', 'ASC']]
+      })
+    ]);
 
     const result = apiKeys.map((key, index) => ({
       ...key.get({ plain: true }),
-      isDisabled: max !== Infinity && index >= max
+      isDisabled: maxLimit !== Infinity && index >= maxLimit
     }));
 
-    return res.json({
-      success: true,
-      data: result
-    });
-
+    return handleResponse(res, 200, { data: result });
   } catch (error) {
-    console.error('List API keys error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to list API keys'
-    });
+    return handleError(res, 'list API keys', error);
   }
 };
 
 const deleteApiKey = async (req, res) => {
   try {
-    const apiKey = await ApiKey.findOne({
-      where: {
-        id: req.params.id,
-        userId: req.user.id
-      }
+    const apiKey = await ApiKey.findOne({ 
+      where: { id: req.params.id, userId: req.user.id } 
     });
 
-    if (!apiKey) {
-      return res.status(404).json({
-        success: false,
-        message: 'API key not found'
-      });
-    }
+    if (!apiKey) return handleResponse(res, 404, { message: RESPONSE_MESSAGES.notFound });
 
     await apiKey.destroy();
-
-    return res.json({
-      success: true,
-      message: 'API key deleted successfully'
-    });
+    return handleResponse(res, 200, { message: RESPONSE_MESSAGES.deleted });
   } catch (error) {
-    console.error('Delete API key error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to delete API key'
-    });
+    return handleError(res, 'delete API key', error);
   }
 };
 
-const authenticateWithApiKey = async (req, res, next) => {
+const authenticateWithApiKey = async (req, _, next) => {
   try {
     const apiKey = req.headers['x-api-key'] || req.query.apiKey;
+    if (!apiKey) return next({ status: 401, message: RESPONSE_MESSAGES.authRequired });
 
-    if (!apiKey) {
-      return res.status(401).json({
-        success: false,
-        message: 'API key is required'
-      });
-    }
-
-    const hashedKey = hashApiKey(apiKey);
     const apiKeyRecord = await ApiKey.findOne({
       where: {
-        key: hashedKey,
+        key: hashKey(apiKey),
         isActive: true,
         [Op.or]: [
           { expiresAt: null },
           { expiresAt: { [Op.gt]: new Date() } }
         ]
       },
-      include: ['user']
+      include: { association: 'user', attributes: ['id', 'email', 'role'] }
     });
 
-    if (!apiKeyRecord) {
-      return res.status(403).json({
-        success: false,
-        message: 'Invalid or expired API key'
-      });
-    }
+    if (!apiKeyRecord) return next({ status: 403, message: RESPONSE_MESSAGES.invalidKey });
 
     await apiKeyRecord.update({ lastUsedAt: new Date() });
-
     req.apiKey = apiKeyRecord;
     req.user = apiKeyRecord.user;
     next();
   } catch (error) {
-    console.error('API key auth error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    next({ status: 500, message: 'Authentication error', error });
   }
 };
 
-const checkApiKeyScope = (requiredScope) => {
-  return (req, res, next) => {
-    if (!req.apiKey.scopes.includes('*') &&
-        !req.apiKey.scopes.includes(requiredScope)) {
-      return res.status(403).json({
-        success: false,
-        message: `Insufficient scope. Required: ${requiredScope}`
-      });
-    }
-    next();
-  };
+const checkApiKeyScope = requiredScope => (req, res, next) => {
+  const { scopes } = req.apiKey;
+  if (!scopes.includes('*') && !scopes.includes(requiredScope)) {
+    return handleResponse(res, 403, {
+      message: `${RESPONSE_MESSAGES.insufficientScope} ${requiredScope}`
+    });
+  }
+  next();
+};
+
+const errorHandler = (err, _, res, __) => {
+  const status = err.status || 500;
+  return handleResponse(res, status, {
+    message: err.message || 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err : undefined
+  });
 };
 
 module.exports = {
@@ -185,9 +148,6 @@ module.exports = {
   deleteApiKey,
   authenticateWithApiKey,
   checkApiKeyScope,
-  _internal: {
-    generateApiKey,
-    hashApiKey,
-    validateScopes
-  }
+  errorHandler,
+  _internal: { generateSecureKey, hashKey, normalizeScopes }
 };
