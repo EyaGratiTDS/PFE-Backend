@@ -179,7 +179,6 @@ const deleteFileIfExists = (filePath) => {
       });
     } catch (error) {
       console.error('Login error:', error);
-      await activityLogController.logActivity(user.id, 'login_failed', req);
       res.status(500).json({ 
         success: false,
         message: 'Failed to log in. Please try again.' 

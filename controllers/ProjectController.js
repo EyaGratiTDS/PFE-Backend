@@ -3,6 +3,9 @@ const { getActiveBlockLimit, getProjectLimits } = require('../middleware/planLim
 const User = require('../models/User');
 const path = require('path');
 const fs = require('fs');
+const VCard = require("../models/Vcard");
+const Subscription = require("../models/Subscription");
+const Plan = require("../models/Plan");
 
 const createProject = async (req, res) => {
   try {
@@ -38,34 +41,6 @@ const createProject = async (req, res) => {
       error: 'Server error',
       details: error.message
     });
-  }
-};
-
-const getVCardsByProjectId = async (req, res) => { //reste non fonctionnel
-  try {
-    const { vcardId } = req.query;
-    const userId = req.user.id;
-
-    if (!vcardId) {
-      return res.status(400).json({ error: 'vcardId est requis' });
-    }
-
-    const blocks = await Project.findAll({
-      where: { vcardId },
-      order: [['createdAt', 'ASC']]
-    });
-
-    const maxActive = await getActiveBlockLimit(userId, vcardId);
-
-    const result = blocks.map((block, index) => ({
-      ...block.get({ plain: true }),
-      isDisabled: index >= maxActive
-    }));
-
-    res.json(result);
-  } catch (error) {
-    console.error('Error fetching blocks:', error);
-    res.status(500).json({ error: 'Server error' });
   }
 };
 
@@ -140,14 +115,14 @@ const updateProject = async (req, res) => {
     }
 
     const updatedProject = await Project.findByPk(req.params.id);
-    
+
     res.json(updatedProject);
 
   } catch (error) {
     console.error('Error updating project:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Server error',
-      details: error.message 
+      details: error.message
     });
   }
 };
@@ -186,11 +161,68 @@ const getProjectsByUserId = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 }
+
+const getVCardsByProject = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const project = await Project.findByPk(id);
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    const vcards = await VCard.findAll({
+      where: { projectId: id },
+      include: [
+        {
+          model: User,
+          as: 'Users',
+          include: [{
+            model: Subscription,
+            as: 'Subscription',
+            where: { status: 'active' },
+            include: [{
+              model: Plan,
+              as: 'Plan'
+            }],
+            required: false
+          }]
+        }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const enhancedVCards = vcards.map(vcard => ({
+      ...vcard.get({ plain: true }),
+      logo: vcard.logo ? `${baseUrl}${vcard.logo}` : null,
+      favicon: vcard.favicon ? `${baseUrl}${vcard.favicon}` : null,
+      background_value: vcard.background_type === 'custom-image'
+        ? `${baseUrl}${vcard.background_value}`
+        : vcard.background_value
+    }));
+
+    res.json({
+      success: true,
+      count: enhancedVCards.length,
+      data: enhancedVCards
+    });
+
+  } catch (error) {
+    console.error("Error retrieving project's vCards:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 module.exports = {
   createProject,
-  getVCardsByProjectId,
   getProjectById,
   updateProject,
   deleteProject,
-  getProjectsByUserId
+  getProjectsByUserId,
+  getVCardsByProject
 };

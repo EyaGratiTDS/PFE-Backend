@@ -89,6 +89,14 @@ const VCard = sequelize.define(
         model: 'Users',
         key: 'id'
       }
+    },
+    projectId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'Project',
+        key: 'id'
+      }
     }
    },
   {
@@ -116,6 +124,11 @@ VCard.associate = function(models) {
   VCard.belongsTo(models.Users, {
     foreignKey: 'userId',
     as: 'Users'
+  });
+
+  VCard.belongsTo(models.Project, {
+    foreignKey: 'projectId',
+    as: 'Project'
   });
 
 };

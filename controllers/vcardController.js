@@ -145,7 +145,8 @@ const updateVCard = async (req, res) => {
     background_type,
     background_value,
     font_family,
-    font_size
+    font_size,
+    projectId
   } = req.body;
 
   const logoFile = req.files['logoFile'] ? req.files['logoFile'][0] : null;
@@ -169,6 +170,7 @@ const updateVCard = async (req, res) => {
       background_type,
       font_family,
       font_size,
+      projectId: projectId || null
     };
 
     if (backgroundFile) {
