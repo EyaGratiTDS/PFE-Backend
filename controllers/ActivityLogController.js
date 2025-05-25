@@ -4,7 +4,6 @@ const UAParser = require('ua-parser-js');
 const ActivityLog = require('../models/ActivityLog');
 const User = require('../models/User');
 
-// Helpers constants
 const IP_API_PROVIDERS = [
   'https://api.ipify.org?format=json',
   'https://api.ip.sb/ip'
@@ -12,7 +11,6 @@ const IP_API_PROVIDERS = [
 
 const IP_GEOLOCATION_API = 'http://ip-api.com/json/{ip}?fields=status,country,city,query';
 
-// Helper functions
 const fetchWithFallback = async (urls, options) => {
   for (const url of urls) {
     try {
@@ -27,7 +25,7 @@ const fetchWithFallback = async (urls, options) => {
 
 const cleanIpAddress = (rawIp) => {
   if (!rawIp) return null;
-  
+
   return rawIp
     .split(',')[0]
     .trim()
@@ -71,7 +69,6 @@ const parseUserAgent = (uaHeader) => {
   };
 };
 
-// Core functionality
 const logActivity = async (userId, activityType, req = {}) => {
   try {
     const rawIp = ['x-forwarded-for', 'x-real-ip']
@@ -105,11 +102,10 @@ const logActivity = async (userId, activityType, req = {}) => {
   }
 };
 
-// Activity handlers
 const buildWhereClause = (userId, query) => {
   const { type, days, deviceType, browser } = query;
   const where = { userId };
-  
+
   if (type) where.activityType = type;
   if (days) where.created_at = { [Op.gte]: new Date(Date.now() - days * 86400000) };
   if (deviceType) where.deviceType = deviceType;
@@ -125,12 +121,11 @@ const handleActivityError = (res, context) => (error) => {
   res.status(500).json({ success: false, message: 'Internal server error' });
 };
 
-// Controllers
 const getUserActivities = async (req, res) => {
   try {
     const userId = req.user.isAdmin && req.query.userId ? req.query.userId : req.user.id;
     const { limit = 20, offset = 0 } = req.query;
-    
+
     const { count, rows } = await ActivityLog.findAndCountAll({
       where: buildWhereClause(userId, req.query),
       limit: Number(limit),
@@ -191,7 +186,7 @@ const getActivityDetails = async (req, res) => {
       }]
     });
 
-    activity 
+    activity
       ? handleActivityResponse(res, { data: formatActivityLogs([activity])[0] })
       : res.status(404).json({ success: false, message: 'Activity not found' });
   } catch (error) {
@@ -199,18 +194,17 @@ const getActivityDetails = async (req, res) => {
   }
 };
 
-// Formatting
-const formatActivityLogs = (logs) => logs.map(({ 
-  id, 
-  activityType, 
-  ipAddress, 
-  city, 
-  country, 
-  deviceType, 
-  os, 
-  browser, 
-  created_at, 
-  user 
+const formatActivityLogs = (logs) => logs.map(({
+  id,
+  activityType,
+  ipAddress,
+  city,
+  country,
+  deviceType,
+  os,
+  browser,
+  created_at,
+  user
 }) => ({
   id,
   activityType,
@@ -226,5 +220,6 @@ module.exports = {
   getUserActivities,
   getFailedAttempts,
   getRecentActivities,
-  getActivityDetails
+  getActivityDetails,
+  formatActivityLogs
 };

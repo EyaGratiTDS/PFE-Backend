@@ -97,6 +97,10 @@ const VCard = sequelize.define(
         model: 'Project',
         key: 'id'
       }
+    },
+     pixelId: {
+      type: DataTypes.UUID,
+      allowNull: true,
     }
    },
   {
@@ -129,6 +133,12 @@ VCard.associate = function(models) {
   VCard.belongsTo(models.Project, {
     foreignKey: 'projectId',
     as: 'Project'
+  });
+
+  VCard.hasOne(models.Pixel, {
+    foreignKey: 'vcardId',
+    as: 'Pixel',
+    onDelete: 'CASCADE'
   });
 
 };

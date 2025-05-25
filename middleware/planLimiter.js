@@ -11,14 +11,14 @@ const getCurrentPlan = async (userId) => {
     include: [{ model: Plan, as: 'Plan' }],
   });
 
-  return activeSubscription?.Plan || 
+  return activeSubscription?.Plan ||
     await Plan.findOne({ where: { name: 'Free', is_active: true } });
 };
 
 const parsePlanFeatures = (plan) => {
   try {
-    return typeof plan.features === 'string' ? 
-      JSON.parse(plan.features) : 
+    return typeof plan.features === 'string' ?
+      JSON.parse(plan.features) :
       (Array.isArray(plan.features) ? plan.features : []);
   } catch (e) {
     console.error('Error parsing features:', e);
@@ -31,14 +31,14 @@ const getResourceLimits = async (userId, resourceConfig) => {
   if (!plan) throw new Error('Plan not found');
 
   const features = parsePlanFeatures(plan);
-  const resourceFeature = features.find(f => 
+  const resourceFeature = features.find(f =>
     f.toLowerCase().includes(resourceConfig.keyword) &&
-    (!resourceConfig.excludeKeyword || 
+    (!resourceConfig.excludeKeyword ||
      !f.toLowerCase().includes(resourceConfig.excludeKeyword))
   );
 
   let max = resourceConfig.defaultLimit;
-  
+
   if (resourceFeature?.toLowerCase().includes('unlimited')) {
     max = -1;
   } else if (resourceFeature) {
@@ -46,14 +46,14 @@ const getResourceLimits = async (userId, resourceConfig) => {
     max = match ? parseInt(match[0], 10) : resourceConfig.defaultLimit;
   }
 
-  const current = await resourceConfig.countModel.count({ 
-    where: resourceConfig.query ? { [resourceConfig.query]: userId } : {} 
+  const current = await resourceConfig.countModel.count({
+    where: resourceConfig.query ? { [resourceConfig.query]: userId } : {}
   });
 
   return { current, max };
 };
 
-const checkResourceCreation = (getLimitFunction, resourceName) => 
+const checkResourceCreation = (getLimitFunction, resourceName) =>
   async (req, res, next) => {
     try {
       const mockRes = {
@@ -62,7 +62,7 @@ const checkResourceCreation = (getLimitFunction, resourceName) =>
         status: function(code) { this.statusCode = code; return this; },
         json: (data) => { mockRes.locals.limits = data; }
       };
-
+      console.log(req.user.id);
       await getLimitFunction({ user: { id: req.user.id } }, mockRes);
 
       if (mockRes.statusCode !== 200) {
@@ -114,10 +114,7 @@ const limitConfigs = {
 const getLimitsHandler = (resourceType) => async (req, res) => {
   try {
     const config = limitConfigs[resourceType];
-    const result = await getResourceLimits(req.user.id, {
-      ...config,
-      query: req.query[config.query]
-    });
+    const result = await getResourceLimits(req.user.id, config);
 
     res.json(result);
   } catch (error) {
@@ -129,7 +126,7 @@ const getLimitsHandler = (resourceType) => async (req, res) => {
   }
 };
 
-const getActiveResourceLimit = (getLimitFunction, defaultLimit) => 
+const getActiveResourceLimit = (getLimitFunction, defaultLimit) =>
   async (userId, identifier) => {
     try {
       const mockRes = {

@@ -16,6 +16,7 @@ const paymentRoutes = require('./routes/paymentRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const LimitsRoutes = require('./routes/LimiteRoutes');
 const projectRoutes = require('./routes/projectRoutes');
+const pixelRoutes = require('./routes/pixelRoutes');
 const sequelize = require('./database/sequelize');
 const { requireAuth } = require('./middleware/authMiddleware');
 const path = require("path");
@@ -161,6 +162,7 @@ app.use('/payment', paymentRoutes);
 app.use('/notification', notificationRoutes);
 app.use('/limits', LimitsRoutes);
 app.use('/project', projectRoutes);
+app.use('/pixel', pixelRoutes);
 
 app.get('/', (_req, res) => {
   res.send('Welcome to the User Management API!');
