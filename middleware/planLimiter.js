@@ -4,6 +4,7 @@ const Plan = require("../models/Plan");
 const Block = require('../models/Block');
 const ApiKey = require('../models/ApiKey');
 const Project = require('../models/Project');
+const Pixel = require('../models/Pixel');
 
 const getCurrentPlan = async (userId) => {
   const activeSubscription = await Subscription.findOne({
@@ -46,9 +47,14 @@ const getResourceLimits = async (userId, resourceConfig) => {
     max = match ? parseInt(match[0], 10) : resourceConfig.defaultLimit;
   }
 
-  const current = await resourceConfig.countModel.count({
-    where: resourceConfig.query ? { [resourceConfig.query]: userId } : {}
-  });
+  let current;
+  if (resourceConfig.customCount) {
+    current = await resourceConfig.customCount(userId);
+  } else {
+    current = await resourceConfig.countModel.count({
+      where: resourceConfig.query ? { [resourceConfig.query]: userId } : {}
+    });
+  }
 
   return { current, max };
 };
@@ -108,6 +114,21 @@ const limitConfigs = {
     defaultLimit: 1,
     countModel: ApiKey,
     query: 'userId'
+  },
+  pixel: {
+    keyword: 'pixel',
+    defaultLimit: 0,
+    countModel: Pixel,
+    customCount: async (userId) => {
+      return await Pixel.count({
+        include: [{
+          model: VCard,
+          as: 'VCard',
+          where: { userId },
+          attributes: []
+        }]
+      });
+    }
   }
 };
 
@@ -159,16 +180,18 @@ module.exports = {
   getProjectLimits: getLimitsHandler('project'),
   getBlocksLimits: getLimitsHandler('block'),
   getApiKeyLimits: getLimitsHandler('apiKey'),
+  getPixelLimits: getLimitsHandler('pixel'),
 
   checkVCardCreation: checkResourceCreation(getLimitsHandler('vcard'), 'VCard'),
   checkProjectCreation: checkResourceCreation(getLimitsHandler('project'), 'Project'),
   checkBlockCreation: checkResourceCreation(getLimitsHandler('block'), 'Block'),
   checkApiKeyCreation: checkResourceCreation(getLimitsHandler('apiKey'), 'API Key'),
+  checkPixelCreation: checkResourceCreation(getLimitsHandler('pixel'), 'Pixel'),
 
   getActiveVCardLimit: getActiveResourceLimit(getLimitsHandler('vcard'), 1),
   getActiveBlockLimit: getActiveResourceLimit(getLimitsHandler('block'), 10),
   getActiveApiKeyLimit: getActiveResourceLimit(getLimitsHandler('apiKey'), 1),
-
+  getActivePixelLimit: getActiveResourceLimit(getLimitsHandler('pixel'), 0),
   get2FAAccess: async (req, res) => {
     try {
       const plan = await getCurrentPlan(req.user.id);

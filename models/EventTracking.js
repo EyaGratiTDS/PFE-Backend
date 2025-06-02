@@ -47,11 +47,11 @@ const EventTracking = sequelize.define('EventTracking', {
     allowNull: true
   },
   country: {
-    type: DataTypes.CHAR(2),
+    type: DataTypes.STRING(2),
     allowNull: true
   },
   region: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: true
   },
   blockId: {
@@ -59,6 +59,22 @@ const EventTracking = sequelize.define('EventTracking', {
     allowNull: true
   },
   city: {
+    type: DataTypes.STRING(100),
+    allowNull: true
+  },
+  deviceType: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  os: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  browser: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  language: {
     type: DataTypes.STRING,
     allowNull: true
   },
@@ -69,7 +85,16 @@ const EventTracking = sequelize.define('EventTracking', {
       model: 'pixels',
       key: 'id'
     }
-  }
+  },
+  source: {
+    type: DataTypes.ENUM(
+      'meta_pixel',
+      'internal_tracking',
+      'google_analytics'
+    ),
+    defaultValue: 'internal_tracking',
+    allowNull: false
+  },
 }, {
   tableName: 'event_trackings',
   timestamps: true,
