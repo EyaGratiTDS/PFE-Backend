@@ -34,10 +34,6 @@ const EventTracking = sequelize.define('EventTracking', {
       this.setDataValue('metadata', value ? JSON.stringify(value) : null);
     }
   },
-  duration: {
-    type: DataTypes.INTEGER,
-    comment: 'Duration in seconds'
-  },
   userAgent: {
     type: DataTypes.TEXT,
     allowNull: true
