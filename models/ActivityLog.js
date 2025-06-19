@@ -71,7 +71,7 @@ const ActivityLog = sequelize.define('ActivityLog',{
 });
 
 ActivityLog.associate = function(models) {
-  ActivityLog.belongsTo(models.Users, { //ligne 74
+  ActivityLog.belongsTo(models.Users, { 
     foreignKey: 'userId',
     as: 'Users'
   });

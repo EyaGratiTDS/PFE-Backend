@@ -26,14 +26,6 @@ const Pixel = sequelize.define('Pixel',{
     type: DataTypes.STRING, 
     allowNull: true
   },
-  metaAccountId: {  
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  encryptedMetaAccessToken: {
-    type: DataTypes.TEXT,
-    allowNull: true
-  },
   is_active: {
     type: DataTypes.BOOLEAN,
     allowNull: false

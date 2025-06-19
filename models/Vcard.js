@@ -17,10 +17,6 @@ const VCard = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    theme: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
     logo: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -49,10 +45,6 @@ const VCard = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: true,
     },
-    opengraph: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
     url: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -72,10 +64,6 @@ const VCard = sequelize.define(
     is_active: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
-    },
-    qr_code: {
-      type: DataTypes.STRING,
-      allowNull: true,
     },
     views: {
       type: DataTypes.INTEGER,

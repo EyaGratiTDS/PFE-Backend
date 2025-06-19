@@ -46,10 +46,6 @@ const Notification = sequelize.define('Notifications', {
     type: DataTypes.BOOLEAN,
     defaultValue: false
   },
-  redirectUrl: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
   metadata: {
     type: DataTypes.JSON,
     allowNull: true
