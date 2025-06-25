@@ -1,10 +1,8 @@
 const { VCard, Pixel, EventTracking } = require('../models');
-const geoip = require('geoip-lite');
 const { getClientIp } = require('request-ip');
 const axios = require('axios'); 
 const UAParser = require('ua-parser-js');
 
-// Fonctions utilitaires
 const parseUserAgent = (uaHeader) => {
   if (!uaHeader) return { deviceType: 'Unknown', os: 'Unknown', browser: 'Unknown' };
   
@@ -21,10 +19,8 @@ const parseUserAgent = (uaHeader) => {
 const cleanIpAddress = (rawIp) => {
   if (!rawIp) return null;
   
-  // Gestion des adresses IPv6 locales
   if (rawIp === '::1') return '127.0.0.1';
   
-  // Extraction de la première IP dans les headers X-Forwarded-For
   return rawIp.split(',')[0].trim().replace('::ffff:', '');
 };
 
@@ -39,7 +35,6 @@ const getPublicIp = async () => {
 };
 
 const getLocationData = async (ip) => {
-  // Si IP locale, obtenir l'IP publique
   if (ip === '127.0.0.1') {
     const publicIp = await getPublicIp();
     ip = publicIp || ip;
@@ -61,7 +56,7 @@ const getLocationData = async (ip) => {
       ip
     };
   } catch (error) {
-    console.error('Geolocation API error:', error.message);
+    console.error(error.message);
     return { 
       country: null, 
       region: null, 
@@ -325,7 +320,6 @@ const getPixelById = async (req, res) => {
 };
 
 const trackEvent = async (req, res) => {
-  console.log("icii");
   try {
     const { pixelId } = req.params;
     const data = req.body;

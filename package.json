@@ -5,7 +5,11 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon index.js"
+    "start": "nodemon index.js",
+    "db:clean": "node scripts/cleanDatabase.js",
+    "db:check": "node scripts/checkIndexes.js",
+    "test:associations": "node scripts/testAssociations.js",
+    "list:models": "node scripts/listModels.js"
   },
   "keywords": [],
   "author": "",

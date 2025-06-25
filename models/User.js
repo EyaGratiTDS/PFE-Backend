@@ -118,6 +118,12 @@ User.associate = function(models) {
     as: 'Project',
     onDelete: 'CASCADE'
   });
+
+  User.hasMany(models.CustomDomain, {
+    foreignKey: 'userId',
+    as: 'CustomDomain',
+    onDelete: 'CASCADE'
+  });
 };
 
 
