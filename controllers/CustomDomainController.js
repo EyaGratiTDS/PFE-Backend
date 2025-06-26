@@ -345,7 +345,6 @@ const handleDomainRequest = async (req, res) => {
     const path = req.path;
     const isRoot = path === '/';
 
-    // Ajouter un timeout pour la recherche du domaine
     const domain = await CustomDomain.findOne({
       where: { domain: hostname, status: 'active' },
       include: [{

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { checkCustomDomainCreation } = require("../middleware/planLimiter"); 
 const {
   createCustomDomain,
   updateCustomDomain,
@@ -14,7 +15,7 @@ const {
 } = require('../controllers/CustomDomainController');
 const { requireAuth } = require('../middleware/authMiddleware');
 
-router.post('/', requireAuth, createCustomDomain);
+router.post('/', requireAuth, checkCustomDomainCreation, createCustomDomain);
 router.get('/', requireAuth, getUserDomains);
 router.get('/:id', requireAuth, getDomainById);
 router.put('/:id', requireAuth, updateCustomDomain);

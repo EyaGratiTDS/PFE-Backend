@@ -5,6 +5,7 @@ const Block = require('../models/Block');
 const ApiKey = require('../models/ApiKey');
 const Project = require('../models/Project');
 const Pixel = require('../models/Pixel');
+const CustomDomain = require('../models/CustomDomain');
 
 const getCurrentPlan = async (userId) => {
   const activeSubscription = await Subscription.findOne({
@@ -31,6 +32,34 @@ const getResourceLimits = async (userId, resourceConfig) => {
   const plan = await getCurrentPlan(userId);
   if (!plan) throw new Error('Plan not found');
 
+  // Gestion spéciale pour les custom domains
+  if (resourceConfig.keyword === 'custom domain') {
+    let max;
+    
+    // Déterminer la limite en fonction du nom du plan
+    switch (plan.name.toLowerCase()) {
+      case 'free':
+        max = 1;
+        break;
+      case 'basic':
+        max = 3;
+        break;
+      case 'pro':
+        max = -1; // -1 représente illimité
+        break;
+      default:
+        max = resourceConfig.defaultLimit;
+    }
+
+    // Compter les custom domains existants
+    const current = await CustomDomain.count({
+      where: { userId }
+    });
+
+    return { current, max };
+  }
+
+  // Logique existante pour les autres ressources
   const features = parsePlanFeatures(plan);
   const resourceFeature = features.find(f =>
     f.toLowerCase().includes(resourceConfig.keyword) &&
@@ -68,7 +97,7 @@ const checkResourceCreation = (getLimitFunction, resourceName) =>
         status: function(code) { this.statusCode = code; return this; },
         json: (data) => { mockRes.locals.limits = data; }
       };
-      console.log(req.user.id);
+      
       await getLimitFunction({ user: { id: req.user.id } }, mockRes);
 
       if (mockRes.statusCode !== 200) {
@@ -129,6 +158,12 @@ const limitConfigs = {
         }]
       });
     }
+  },
+  customDomain: {
+    keyword: 'custom domain',
+    defaultLimit: 1,
+    countModel: CustomDomain,
+    query: 'userId'
   }
 };
 
@@ -181,17 +216,20 @@ module.exports = {
   getBlocksLimits: getLimitsHandler('block'),
   getApiKeyLimits: getLimitsHandler('apiKey'),
   getPixelLimits: getLimitsHandler('pixel'),
+  getCustomDomainLimits: getLimitsHandler('customDomain'),
 
   checkVCardCreation: checkResourceCreation(getLimitsHandler('vcard'), 'VCard'),
   checkProjectCreation: checkResourceCreation(getLimitsHandler('project'), 'Project'),
   checkBlockCreation: checkResourceCreation(getLimitsHandler('block'), 'Block'),
   checkApiKeyCreation: checkResourceCreation(getLimitsHandler('apiKey'), 'API Key'),
   checkPixelCreation: checkResourceCreation(getLimitsHandler('pixel'), 'Pixel'),
+  checkCustomDomainCreation: checkResourceCreation(getLimitsHandler('customDomain'), 'Custom Domain'),
 
   getActiveVCardLimit: getActiveResourceLimit(getLimitsHandler('vcard'), 1),
   getActiveBlockLimit: getActiveResourceLimit(getLimitsHandler('block'), 10),
   getActiveApiKeyLimit: getActiveResourceLimit(getLimitsHandler('apiKey'), 1),
   getActivePixelLimit: getActiveResourceLimit(getLimitsHandler('pixel'), 0),
+  getActiveCustomDomainLimit: getActiveResourceLimit(getLimitsHandler('customDomain'), 1),
   get2FAAccess: async (req, res) => {
     try {
       const plan = await getCurrentPlan(req.user.id);
