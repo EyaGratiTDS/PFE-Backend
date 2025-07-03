@@ -129,7 +129,6 @@ VCard.associate = function(models) {
     onDelete: 'CASCADE'
   });
 
-  // Relation 1:1 - VCard peut avoir UN CustomDomain
   VCard.hasOne(models.CustomDomain, {
     foreignKey: 'vcardId',
     as: 'customDomain',

@@ -88,7 +88,6 @@ const mapToMetaEvent = (eventType) => {
   return mapping[eventType] || 'CustomEvent';
 };
 
-// Contrôleurs
 const createMetaPixel = async (accessToken, accountId, name) => {
   try {
     const url = `${process.env.META_API_URL}/${process.env.META_API_VERSION}/${accountId}/adspixels`;
@@ -296,7 +295,7 @@ const getPixelById = async (req, res) => {
 
     res.json({
       success: true,
-      pixel: {
+      data: {
         id: pixel.id,
         name: pixel.name,
         metaPixelId: pixel.metaPixelId,

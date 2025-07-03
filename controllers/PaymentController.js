@@ -199,7 +199,6 @@ const paymentController = {
 
       await transaction.commit();
 
-      // Récupérer les informations du paiement Stripe
       const stripePayment = await stripe.paymentIntents.retrieve(payment.transaction_id);
       const isRenewal = stripePayment.metadata.isRenewal === 'true';
 
@@ -344,7 +343,6 @@ const paymentController = {
           }
         } catch (notificationError) {
           console.error('Error sending notification:', notificationError);
-          // Ne pas échouer si la notification échoue
         }
       }
     } catch (error) {

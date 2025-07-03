@@ -61,16 +61,18 @@ const createApiKey = async (req, res) => {
 
 const listApiKeys = async (req, res) => {
   try {
-    const [maxLimit, apiKeys] = await Promise.all([
-      getActiveApiKeyLimit(req.user.id),
-      ApiKey.findAll({
-        where: { userId: req.user.id },
-        attributes: ['id', 'name', 'prefix', 'scopes', 'expiresAt', 'isActive', 'lastUsedAt', 'created_at'],
-        order: [['created_at', 'ASC']]
-      })
-    ]);
+    const maxLimit = await getActiveApiKeyLimit(req.user.id);
+    const apiKeys = await ApiKey.findAll({
+      where: { userId: req.user.id },
+      attributes: ['id', 'name', 'prefix', 'scopes', 'expiresAt', 'isActive', 'lastUsedAt', 'created_at'],
+      order: [['created_at', 'ASC']]
+    });
 
-    const result = apiKeys.map((key, index) => ({
+    const sortedKeys = [...apiKeys].sort((a, b) => 
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+
+    const result = sortedKeys.map((key, index) => ({
       ...key.get({ plain: true }),
       isDisabled: maxLimit !== Infinity && index >= maxLimit
     }));

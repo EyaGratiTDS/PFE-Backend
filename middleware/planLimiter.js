@@ -32,11 +32,31 @@ const getResourceLimits = async (userId, resourceConfig) => {
   const plan = await getCurrentPlan(userId);
   if (!plan) throw new Error('Plan not found');
 
-  // Gestion spéciale pour les custom domains
+    if (resourceConfig.keyword === 'api key') {
+    let max;
+    switch (plan.name.toLowerCase()) {
+      case 'free':
+        max = 1;
+        break;
+      case 'basic':
+        max = 5;
+        break;
+      case 'pro':
+        max = -1; 
+        break;
+      default:
+        max = resourceConfig.defaultLimit;
+    }
+
+    const current = await ApiKey.count({
+      where: { userId }
+    });
+
+    return { current, max };
+  }
+
   if (resourceConfig.keyword === 'custom domain') {
     let max;
-    
-    // Déterminer la limite en fonction du nom du plan
     switch (plan.name.toLowerCase()) {
       case 'free':
         max = 1;
@@ -45,13 +65,12 @@ const getResourceLimits = async (userId, resourceConfig) => {
         max = 3;
         break;
       case 'pro':
-        max = -1; // -1 représente illimité
+        max = -1; 
         break;
       default:
         max = resourceConfig.defaultLimit;
     }
 
-    // Compter les custom domains existants
     const current = await CustomDomain.count({
       where: { userId }
     });
@@ -59,7 +78,6 @@ const getResourceLimits = async (userId, resourceConfig) => {
     return { current, max };
   }
 
-  // Logique existante pour les autres ressources
   const features = parsePlanFeatures(plan);
   const resourceFeature = features.find(f =>
     f.toLowerCase().includes(resourceConfig.keyword) &&

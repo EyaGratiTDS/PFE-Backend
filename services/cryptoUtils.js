@@ -9,7 +9,6 @@ const encryptToken = (token) => {
     throw new Error('ENCRYPTION_KEY not found in environment variables');
   }
 
-  // S'assurer que la clé fait 32 bytes
   const key = Buffer.from(process.env.ENCRYPTION_KEY.substring(0, 64), 'hex');
   if (key.length !== 32) {
     throw new Error('ENCRYPTION_KEY must be 32 bytes (64 hex characters)');

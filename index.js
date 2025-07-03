@@ -46,76 +46,177 @@ app.use(cors({
   credentials: true
 }));
 
+app.use(async (req, res, next) => {
+  if (req.path === '/auth/refresh-token' || req.path === '/auth/login') {
+    return next();
+  }
+  
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    
+    try {
+      const decoded = jwt.decode(token);
+      if (decoded && decoded.exp * 1000 < Date.now()) {
+        const refreshToken = req.cookies.refreshToken;
+        if (refreshToken) {
+          const newToken = await refreshAccessToken(refreshToken);
+          if (newToken) {
+            req.headers.authorization = `Bearer ${newToken}`;
+            res.set('X-New-Access-Token', newToken);
+          }
+        }
+      }
+    } catch (error) {
+      console.log('Token refresh middleware:', error.message);
+    }
+  }
+  next();
+});
+
+async function refreshAccessToken(refreshToken) {
+  try {
+    const user = await User.findOne({ where: { refresh_token: refreshToken } });
+    if (!user) return null;
+    
+    const newToken = jwt.sign(
+      { id: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_ACCESS_EXPIRATION }
+    );
+    
+    return newToken;
+  } catch (error) {
+    console.error('Token refresh failed:', error);
+    return null;
+  }
+}
+
+const verifyToken = async (token, ws) => {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      if (ws && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'TOKEN_EXPIRED',
+          message: 'Access token expired. Please refresh your token.',
+          expiredAt: error.expiredAt.toISOString()
+        }));
+      }
+      throw error;
+    }
+    
+    if (error.name === 'JsonWebTokenError') {
+      throw new Error('Invalid token format');
+    }
+    
+    if (error.name === 'NotBeforeError') {
+      throw new Error('Token not yet valid');
+    }
+    
+    throw error;
+  }
+};
+
 wss.on('connection', (ws, req) => {
   const token = url.parse(req.url, true).query.token;
+  
   if (!token) {
     ws.close(1008, 'Token manquant');
     return;
   }
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.id.toString();
+  const handleConnection = async () => {
+    try {
+      const decoded = await verifyToken(token, ws);
+      const userId = decoded.id.toString();
 
-    ws.isAlive = true;
+      const heartbeatInterval = setInterval(() => {
+        if (ws.readyState !== ws.OPEN) return;
+        ws.ping();
+      }, 30000);
 
-    const heartbeatInterval = setInterval(() => {
-      if (ws.isAlive !== true) return ws.terminate();
-      ws.isAlive = false;
-      ws.ping();
-    }, 3000);
+      ws.on('pong', () => {
+      });
 
-    ws.on('pong', () => {
-      ws.isAlive = true;
-      ws.send(JSON.stringify({ type: 'HEARTBEAT_ACK' }));
-    });
-
-    if (!clients.has(userId)) {
-      clients.set(userId, new Set());
-    }
-    clients.get(userId).add(ws);
-
-    ws.on('close', () => {
-      clearInterval(heartbeatInterval);
-      if (clients.has(userId)) {
-        clients.get(userId).delete(ws);
-        if (clients.get(userId).size === 0) {
-          clients.delete(userId);
-        }
+      if (!clients.has(userId)) {
+        clients.set(userId, new Set());
       }
-    });
+      clients.get(userId).add(ws);
 
-    ws.on('message', (message) => {
+      ws.on('close', () => {
+        clearInterval(heartbeatInterval);
+        if (clients.has(userId)) {
+          clients.get(userId).delete(ws);
+          if (clients.get(userId).size === 0) {
+            clients.delete(userId);
+          }
+        }
+      });
 
-      ws.isAlive = true; 
-      try {
-        const data = JSON.parse(message.toString());
-         if (data.type === 'PING') {
+      ws.on('message', async (message) => {
+        try {
+          const data = JSON.parse(message.toString());
+          
+          if (data.type === 'REFRESH_TOKEN') {
+            const newToken = await refreshAccessToken(data.refreshToken);
+            if (newToken) {
+              ws.send(JSON.stringify({
+                type: 'NEW_TOKEN',
+                token: newToken
+              }));
+            } else {
+              ws.send(JSON.stringify({
+                type: 'REFRESH_FAILED',
+                message: 'Failed to refresh token'
+              }));
+            }
+            return;
+          }
+          
+          if (data.type === 'PING') {
             ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now() }));
           }
-        if (data.type === 'IDENTIFY' && data.userId) {
-          const clientUserId = data.userId.toString();
-          if (clientUserId !== userId) {
-            if (clients.has(userId)) {
-              clients.get(userId).delete(ws);
-              if (clients.get(userId).size === 0) {
-                clients.delete(userId);
+          
+          if (data.type === 'IDENTIFY' && data.userId) {
+            const clientUserId = data.userId.toString();
+            if (clientUserId !== userId) {
+              if (clients.has(userId)) {
+                clients.get(userId).delete(ws);
+                if (clients.get(userId).size === 0) {
+                  clients.delete(userId);
+                }
               }
+              if (!clients.has(clientUserId)) {
+                clients.set(clientUserId, new Set());
+              }
+              clients.get(clientUserId).add(ws);
             }
-            if (!clients.has(clientUserId)) {
-              clients.set(clientUserId, new Set());
-            }
-            clients.get(clientUserId).add(ws);
           }
+        } catch (error) {
+          console.error('Error processing message:', error);
         }
-      } catch (error) {
-        console.error('Error processing message:', error);
+      });
+
+    } catch (error) {
+      //console.error('WebSocket authentication error:', error.message);
+      
+      let closeReason = 'Authentication failed';
+      if (error.message.includes('expired')) {
+        closeReason = `Token expired at ${error.expiredAt}`;
+        return;
+      } else if (error.message.includes('Invalid token format')) {
+        closeReason = 'Invalid token format';
+      } else if (error.message.includes('not yet valid')) {
+        closeReason = 'Token not yet valid';
       }
-    });
-  } catch (error) {
-    console.error('WebSocket authentication error:', error);
-    ws.close(1008, 'Authentication failed');
-  }
+      
+      ws.close(1008, closeReason);
+    }
+  };
+
+  handleConnection();
 });
 
 const broadcastToUser = (userId, data) => {
@@ -141,7 +242,12 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'vcard-session',
   resave: false,
   saveUninitialized: true,
-  cookie: { secure: process.env.NODE_ENV === 'production' }
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000
+  }
 }));
 
 app.use(cookieParser());
@@ -165,6 +271,24 @@ app.use('/limits', LimitsRoutes);
 app.use('/project', projectRoutes);
 app.use('/pixel', pixelRoutes);
 app.use('/custom-domain', customDomainRoutes);
+
+app.post('/auth/refresh-token', async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    if (!refreshToken) {
+      return res.status(401).json({ error: 'Refresh token missing' });
+    }
+
+    const newToken = await refreshAccessToken(refreshToken);
+    if (!newToken) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+
+    res.json({ token: newToken });
+  } catch (error) {
+    res.status(500).json({ error: 'Token refresh failed' });
+  }
+});
 
 app.get('/', (_req, res) => {
   res.send('Welcome to the User Management API!');
