@@ -8,6 +8,7 @@ router.post('/sign-up', userController.signUp);
 router.get('/verify-email', userController.verifyEmail);
 router.post('/sign-in', userController.signIn);
 router.post('/logout',authMiddleware.requireAuth, userController.logout);
+router.post('/add-user', userController.createUser);
 router.get('/me',authMiddleware.requireAuth, userController.getCurrentUser);
 router.put('/me', authMiddleware.requireAuth, userController.upload.single('avatar'), userController.updateUser);
 router.post('/change-password', authMiddleware.requireAuth, userController.changePassword);

@@ -97,4 +97,36 @@ const sendCustomEmail = async (email, name, { subject, text, html }) => {
   }
 };
 
-module.exports = { sendVerificationEmail, sendResetPasswordEmail, sendWelcomeEmail, sendCustomEmail };
+const sendAccountCreationEmail = async (email, name, userEmail, password) => {
+  const msg = {
+    to: email,
+    from: process.env.EMAIL_FROM,
+    subject: 'Your New Account Credentials',
+    html: `<div style="font-family: Arial, sans-serif; color: #333;">
+        <h2>Hello ${name},</h2>
+        <p>Your account has been created by an administrator.</p>
+        <p>Here are your login credentials:</p>
+        <p><strong>Email:</strong> ${userEmail}</p>
+        <p><strong>Password:</strong> ${password}</p>
+        <p style="color: #ff0000; font-weight: bold;">
+          For security reasons, we recommend changing your password immediately after logging in.
+        </p>
+        <p>You can log in to your account here: 
+          <a href="${process.env.FRONTEND_URL}/sign-in" style="color: #06A3DA; text-decoration: none;">
+            ${process.env.FRONTEND_URL}/sign-in
+          </a>
+        </p>
+        <p>Best regards,<br>The vCards Team</p>
+      </div>`,
+  };
+
+  try {
+    await sgMail.send(msg);
+    console.log('Account creation email sent');
+  } catch (error) {
+    console.error('Error sending account creation email:', error);
+    throw error;
+  }
+};
+
+module.exports = { sendVerificationEmail, sendResetPasswordEmail, sendWelcomeEmail, sendCustomEmail, sendAccountCreationEmail };

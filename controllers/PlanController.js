@@ -52,8 +52,9 @@ const searchPlans = async (req, res) => {
 
 const createPlan = async (req, res) => {
   try {
+    console.log("icii");
     const { features = [], ...planData } = req.body;
-    
+    console.log(req.body);
     if (!planData.name || planData.price === undefined || planData.duration_days === undefined) {
       return res.status(400).json({
         success: false,

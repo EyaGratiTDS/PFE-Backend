@@ -1,11 +1,11 @@
-const { Op } = require('sequelize'); // Ajout de l'import manquant
+const { Op } = require('sequelize'); 
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const multer = require("multer");
 const path = require("path");
 const fs = require('fs');
-const { sendVerificationEmail } = require('../services/emailService');
+const { sendVerificationEmail, sendAccountCreationEmail } = require('../services/emailService');
 const axios = require('axios');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
@@ -124,6 +124,13 @@ const signIn = async (req, res) => {
       });
     }
 
+    if (user.isActive === false) {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Your account has been deactivated. Please contact support to reactivate it.'
+      });
+    }
+
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({ 
@@ -131,12 +138,14 @@ const signIn = async (req, res) => {
         message: 'Invalid email or password' 
       });
     }
+
     if (!user.isVerified) {
       return res.status(403).json({ 
         success: false,
         message: 'Please verify your email address to activate your account.' 
       });
     }
+
     let requires2FA = false;
     let tempToken;
 
@@ -763,7 +772,6 @@ const toggleUserStatus = async (req, res) => {
     user.isActive = isActive;
     await user.save();
     
-    //await notificationController.sendAccountStatusNotification(user.id, isActive);
     await activityLogController.logActivity(req.user.id, 'user_status_change', req);
     res.json({ 
       success: true, 
@@ -774,6 +782,68 @@ const toggleUserStatus = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to change user status' });
   }
 };
+
+const createUser = async (req, res) => {
+  try {
+    const { name, email, role, password } = req.body;
+    
+    const existingUser = await User.findOne({ where: { email } });
+    if (existingUser) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'A user with this email already exists.' 
+      });
+    }
+
+    const user = await User.create({
+      name,
+      email,
+      role,
+      password, 
+      isVerified: true,
+      isActive: true,
+    });
+
+    const createdUser = await User.findOne({ where: { email } });
+
+        try {
+      await sendAccountCreationEmail(
+        email, 
+        name, 
+        email, 
+        password
+      );
+    } catch (emailError) {
+      console.error('Failed to send account creation email:', emailError);
+    }
+
+
+    await notificationController.sendWelcomeNotification(createdUser.id, name);
+    await activityLogController.logActivity(createdUser.id, 'register_success', req);
+
+    res.status(201).json({
+      success: true,
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive,
+        isVerified: user.isVerified,
+        created_at: user.created_at
+      }
+    });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to create user',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+
 
 module.exports = {
   signIn,
@@ -792,5 +862,6 @@ module.exports = {
   verifyEmail,
   getAllUsers,
   toggleUserStatus,
+  createUser,
   upload
 };
