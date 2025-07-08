@@ -86,7 +86,8 @@ const getVCardsByUserId = async (req, res) => {
 
     const vcards = await VCard.findAll({
       where: {
-        userId: userId
+        userId: userId,
+        status: false
       }
     });
 
@@ -332,6 +333,65 @@ const getVCardByUrl = async (req, res) => {
   }
 };
 
+const getAllVCardsWithUsers = async (req, res) => {
+  try {
+    const vcards = await VCard.findAll({
+      include: [
+        {
+          model: User,
+          as: 'Users',
+          attributes: ['id', 'name', 'avatar','email', 'role'] 
+        }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+    res.json({
+      success: true,
+      data: vcards,
+    });
+  } catch (error) {
+    console.error("Error fetching VCards with users:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+const toggleVCardStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({ message: "VCard ID is required" });
+    }
+
+    const vcard = await VCard.findByPk(id);
+    if (!vcard) {
+      return res.status(404).json({ message: "VCard not found" });
+    }
+
+    const newStatus = !vcard.status;
+    
+    await VCard.update(
+      { status: newStatus },
+      { where: { id } }
+    );
+
+    res.json({
+      message: `VCard ${newStatus ? 'activated' : 'deactivated'} successfully`,
+      vcardId: id,
+      newStatus
+    });
+
+  } catch (error) {
+    console.error("Error toggling VCard status:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 module.exports = {
   createVCard,
   getVCardsByUserId,
@@ -340,4 +400,6 @@ module.exports = {
   deleteVCard,
   deleteLogo,
   getVCardByUrl,
+  getAllVCardsWithUsers,
+  toggleVCardStatus
 };

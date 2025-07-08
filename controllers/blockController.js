@@ -93,10 +93,32 @@ const getBlocksByVcardId = async (req, res) => {
   }
 };
 
+const getBlocksByVcardIdAdmin = async (req, res) => {
+  try {
+    const { vcardId } = req.query;
+    console.log("icii");
+    if (!vcardId) return sendErrorResponse(res, 400, ERROR_RESPONSES.missingVcardId);
+
+    const [blocks, maxActive] = await Promise.all([
+      Block.findAll({ where: { vcardId, status: true }, order: [['createdAt', 'ASC']] }),
+      getActiveBlockLimit(req.user.id, vcardId)
+    ]);
+
+    const result = blocks.map((block, index) => ({
+      ...block.get({ plain: true }),
+      isDisabled: index >= maxActive
+    }));
+
+    res.json(result);
+  } catch (error) {
+    sendErrorResponse(res, 500, ERROR_RESPONSES.serverError(), error);
+  }
+};
+
 const getBlockById = async (req, res) => {
   try {
     const block = await Block.findByPk(req.params.id, {
-      include: { model: VCard, as: 'vcard', attributes: ['id', 'name'] }
+      include: { model: VCard, as: 'VCard', attributes: ['id', 'name'] }
     });
 
     block ? res.json(block) : sendErrorResponse(res, 404, ERROR_RESPONSES.notFound);
@@ -131,6 +153,30 @@ const deleteBlock = async (req, res) => {
   }
 };
 
+const toggleBlock = async (req, res) => {
+  try {
+    const blockId = req.params.id;
+    const block = await Block.findByPk(blockId);
+    
+    if (!block) {
+      return sendErrorResponse(res, 404, ERROR_RESPONSES.notFound);
+    }
+
+    const newStatus = !block.status;
+    
+    const updatedBlock = await block.update({ status: newStatus });
+    
+    res.json({
+      message: `Block status toggled successfully`,
+      blockId: updatedBlock.id,
+      newStatus: updatedBlock.status
+    });
+    
+  } catch (error) {
+    sendErrorResponse(res, 500, ERROR_RESPONSES.serverError(), error);
+  }
+};
+
 module.exports = {
   validateBlockType,
   searchBlocks: [validateQueryParams(['vcardId', 'q']), searchBlocks],
@@ -139,5 +185,7 @@ module.exports = {
   getBlockById,
   updateBlock,
   deleteBlock,
+  toggleBlock,
+  getBlocksByVcardIdAdmin,
   VALID_BLOCK_TYPES: Array.from(VALID_BLOCK_TYPES)
 };

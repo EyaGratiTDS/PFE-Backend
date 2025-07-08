@@ -65,6 +65,10 @@ const VCard = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },
+    status: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
     views: {
       type: DataTypes.INTEGER,
       defaultValue: 0,

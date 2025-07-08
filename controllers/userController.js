@@ -722,7 +722,6 @@ const getAllUsers = async (req, res) => {
     const { page = 1, limit = 10, search = '' } = req.query;
     const offset = (page - 1) * limit;
 
-    // Construction conditionnelle de la clause WHERE
     const where = {};
     if (search) {
       where[Op.or] = [
