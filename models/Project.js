@@ -29,6 +29,10 @@ const Project = sequelize.define(
       type: DataTypes.ENUM('active', 'archived', 'pending'),
       defaultValue: 'active',
     }, 
+    is_blocked: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
     userId: {
       type: DataTypes.INTEGER,
       allowNull: false,

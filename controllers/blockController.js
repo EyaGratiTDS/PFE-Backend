@@ -96,7 +96,6 @@ const getBlocksByVcardId = async (req, res) => {
 const getBlocksByVcardIdAdmin = async (req, res) => {
   try {
     const { vcardId } = req.query;
-    console.log("icii");
     if (!vcardId) return sendErrorResponse(res, 400, ERROR_RESPONSES.missingVcardId);
 
     const [blocks, maxActive] = await Promise.all([

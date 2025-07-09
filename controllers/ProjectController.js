@@ -218,11 +218,74 @@ const getVCardsByProject = async (req, res) => {
   }
 };
 
+const getAllProjectsWithUser = async (req, res) => {
+  try {
+    const projects = await Project.findAll({
+      include: [
+        {
+          model: User,
+          as: 'Users', 
+          attributes: ['id', 'name', 'email'] 
+        }
+      ],
+      order: [['createdAt', 'DESC']] 
+    });
+
+    res.json({
+      success: true,
+      count: projects.length,
+      data: projects
+    });
+  } catch (error) {
+    console.error('Error retrieving projects with users:', error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+const toggleProjectBlocked = async (req, res) => {
+  try {
+    const project = await Project.findByPk(req.params.id);
+    
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const updatedIsBlocked = !project.is_blocked;
+    
+    await Project.update(
+      { is_blocked: updatedIsBlocked },
+      { where: { id: req.params.id } }
+    );
+
+    const updatedProject = await Project.findByPk(req.params.id);
+    
+    res.json({
+      success: true,
+      message: `Project ${updatedIsBlocked ? 'blocked' : 'unblocked'} successfully`,
+      data: updatedProject
+    });
+
+  } catch (error) {
+    console.error('Error toggling project blocked status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error',
+      details: error.message
+    });
+  }
+};
+
 module.exports = {
   createProject,
   getProjectById,
   updateProject,
   deleteProject,
   getProjectsByUserId,
-  getVCardsByProject
+  getVCardsByProject,
+  getAllProjectsWithUser,
+  toggleProjectBlocked
 };
