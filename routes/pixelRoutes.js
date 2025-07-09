@@ -13,10 +13,11 @@ const trackLimiter = rateLimit({
   }
 });
 
-
+router.put('/:id/toggle-status', pixelController.toggleBlocked);
 router.post('/', requireAuth, pixelController.createPixel);
 router.put('/:pixelId', requireAuth, pixelController.updatePixel);
 router.delete('/:pixelId', requireAuth, pixelController.deletePixel);
+router.get('/pixels', pixelController.getPixels);
 router.get('/user', requireAuth, pixelController.getUserPixels);
 router.get('/:pixelId', requireAuth, pixelController.getPixelById);
 router.get('/vcard/:vcardId', requireAuth, pixelController.getPixelsByVCard);

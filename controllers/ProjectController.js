@@ -152,7 +152,8 @@ const getProjectsByUserId = async (req, res) => {
 
     const projects = await Project.findAll({
       where: {
-        userId: userId
+        userId: userId,
+        is_blocked: false
       }
     });
 

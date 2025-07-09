@@ -2,6 +2,7 @@ const { VCard, Pixel, EventTracking } = require('../models');
 const { getClientIp } = require('request-ip');
 const axios = require('axios'); 
 const UAParser = require('ua-parser-js');
+const User = require('../models/User');
 
 const parseUserAgent = (uaHeader) => {
   if (!uaHeader) return { deviceType: 'Unknown', os: 'Unknown', browser: 'Unknown' };
@@ -253,7 +254,7 @@ const getUserPixels = async (req, res) => {
       include: [{
         model: VCard,
         as: "VCard",
-        where: { userId },
+        where: { userId, is_blocked: false },
         attributes: ['id', 'name']
       }]
     });
@@ -467,6 +468,100 @@ const getPixelsByVCard = async (req, res) => {
   }
 };
 
+const getPixels = async (req, res) => {
+  try {
+    const pixels = await Pixel.findAll({
+      include: [
+        {
+          model: VCard,
+          as: 'VCard',
+          attributes: ['id', 'name', 'url'],
+          include: [
+            {
+              model: User, 
+              as: 'Users',  
+              attributes: ['id', 'name', 'email']
+            }
+          ]
+        }
+      ],
+      attributes: [
+        'id',
+        'name',
+        'metaPixelId',
+        'is_active',
+        'is_blocked',
+        'created_at'
+      ]
+    });
+
+    const formattedPixels = pixels.map(pixel => ({
+      id: pixel.id,
+      name: pixel.name,
+      metaPixelId: pixel.metaPixelId,
+      is_active: pixel.is_active,
+      is_blocked: pixel.is_blocked,
+      created_at: pixel.created_at,
+      vcard: pixel.VCard ? {
+        id: pixel.VCard.id,
+        name: pixel.VCard.name,
+        url: pixel.VCard.url, 
+        user: {
+          id: pixel.VCard.Users.id,  
+          name: pixel.VCard.Users.name,
+          email: pixel.VCard.Users.email
+        }
+      } : null 
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: formattedPixels
+    });
+  } catch (error) {
+    console.error("Error fetching pixels:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
+
+const toggleBlocked = async (req, res) => {
+  try {
+    const { id  } = req.params;
+    const pixel = await Pixel.findByPk(id);
+
+    if (!pixel) {
+      return res.status(404).json({
+        success: false,
+        message: "Pixel not found"
+      });
+    }
+
+    await pixel.update({ 
+      is_blocked: !pixel.is_blocked 
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: pixel.id,
+        name: pixel.name,
+        is_blocked: pixel.is_blocked,
+        message: `Pixel ${pixel.is_blocked ? 'blocked' : 'unblocked'} successfully`
+      }
+    });
+
+  } catch (error) {
+    console.error("Pixel toggle blocked error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
+
 module.exports = {
   createPixel,
   updatePixel,
@@ -474,5 +569,7 @@ module.exports = {
   getUserPixels,
   getPixelById,
   trackEvent,
-  getPixelsByVCard
+  getPixelsByVCard,
+  getPixels,
+  toggleBlocked
 };

@@ -30,6 +30,10 @@ const Pixel = sequelize.define('Pixel',{
     type: DataTypes.BOOLEAN,
     allowNull: false
   },
+  is_blocked: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  }
 }, {
   tableName: 'pixels',
   timestamps: true,
