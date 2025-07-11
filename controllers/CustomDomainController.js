@@ -229,7 +229,7 @@ const getUserDomains = async (req, res) => {
     const userId = req.user.id;
 
     const domains = await CustomDomain.findAll({
-      where: { userId },
+      where: { userId, status: { [Op.ne]: 'blocked' } },
       include: [
         {
           model: db.Users,
@@ -569,6 +569,107 @@ const getDomainById = async (req, res) => {
   }
 };
 
+const getAllDomains = async (req, res) => {
+  try {
+    const domains = await db.CustomDomain.findAll({
+      include: [
+        {
+          model: db.Users,
+          attributes: ['id', 'name', 'email'],
+          as: 'Users'
+        },
+        {
+          model: db.VCard,
+          attributes: ['id', 'name', 'url'],
+          as: 'vcard',
+          include: [{
+            model: db.Users,
+            attributes: ['name', 'email'],
+            as: 'Users'
+          }]
+        }
+      ],
+      order: [['created_at', 'DESC']]
+    });
+
+    const formattedDomains = domains.map(domain => ({
+      id: domain.id,
+      domain: domain.domain,
+      status: domain.status,
+      created_at: domain.created_at,
+      custom_index_url: domain.custom_index_url,
+      custom_not_found_url: domain.custom_not_found_url,
+      user: {
+        id: domain.Users.id,
+        name: domain.Users.name,
+        email: domain.Users.email
+      },
+      vcard: domain.vcard ? {
+        id: domain.vcard.id,
+        name: domain.vcard.name,
+        url: domain.vcard.url,
+        user: domain.vcard.Users ? {
+          id: domain.vcard.Users.id,
+          name: domain.vcard.Users.name,
+          email: domain.vcard.Users.email
+        } : null
+      } : null
+    }));
+
+    res.json({
+      success: true,
+      data: formattedDomains
+    });
+  } catch (error) {
+    console.error("Error fetching all domains:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+const toggleDomainStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const allowedStatuses = ['pending', 'active', 'failed', 'blocked'];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status. Allowed values: pending, active, failed, blocked"
+      });
+    }
+
+    const domain = await CustomDomain.findOne({
+      where: { id }
+    });
+
+    if (!domain) {
+      return res.status(404).json({ 
+        success: false,
+        message: "Domain not found" 
+      });
+    }
+
+    await domain.update({ status });
+
+    res.json({
+      success: true,
+      message: `Domain status updated to ${status}`,
+      domain
+    });
+
+  } catch (error) {
+    console.error("Error updating domain status:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error" 
+    });
+  }
+};
+
 module.exports = {
   createCustomDomain,
   updateCustomDomain,
@@ -579,5 +680,7 @@ module.exports = {
   handleDomainRequest,
   handleNotFound,
   linkToVCard,
-  unlinkFromVCard
+  unlinkFromVCard,
+  getAllDomains,
+  toggleDomainStatus
 };

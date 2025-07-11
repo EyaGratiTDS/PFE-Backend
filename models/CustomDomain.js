@@ -23,7 +23,7 @@ const CustomDomain = sequelize.define('CustomDomain',{
       onUpdate: 'CASCADE'
     },
   status: {
-    type: DataTypes.ENUM('pending', 'active', 'failed', 'disabled'),
+    type: DataTypes.ENUM('pending', 'active', 'failed', 'blocked'),
     defaultValue: 'pending'
   },
   verification_code: {
