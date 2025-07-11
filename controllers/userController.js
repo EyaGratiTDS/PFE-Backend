@@ -9,6 +9,7 @@ const { sendVerificationEmail, sendAccountCreationEmail } = require('../services
 const axios = require('axios');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const db = require('../models');
 const activityLogController = require('../controllers/ActivityLogController');
 const notificationController = require('../controllers/NotificationController');
 
@@ -735,12 +736,71 @@ const getAllUsers = async (req, res) => {
       limit: parseInt(limit, 10),
       offset: parseInt(offset, 10),
       attributes: { exclude: ['password', 'twoFactorSecret'] },
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
+      include: [
+        {
+          model: db.Subscription,
+          as: 'Subscription',
+          required: false,
+          where: { status: 'active' },
+          include: [{
+            model: db.Plan,
+            as: 'Plan',
+            attributes: ['id', 'name', 'price']
+          }]
+        }
+      ]
     });
 
+    const freePlan = await db.Plan.findOne({
+      where: { name: 'Free' },
+      attributes: ['id', 'name', 'price']
+    });
+
+    const defaultFreePlan = freePlan || {
+      id: 0,
+      name: "Free",
+      price: 0
+    };
+
+    const formattedUsers = users.map(user => {
+      const userData = user.get({ plain: true });
+      let activeSubscription = null;
+      
+      if (userData.Subscription && userData.Subscription.length > 0) {
+        activeSubscription = userData.Subscription[0];
+      }
+
+      return {
+        id: userData.id,
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+        isActive: userData.isActive,
+        isVerified: userData.isVerified,
+        createdAt: userData.created_at,
+        avatar: userData.avatar,
+        activeSubscription: activeSubscription 
+          ? {
+              id: activeSubscription.id,
+              start_date: activeSubscription.start_date,
+              end_date: activeSubscription.end_date,
+              status: activeSubscription.status,
+              plan: activeSubscription.Plan
+            }
+          : {
+              id: null,
+              start_date: null,
+              end_date: null,
+              status: 'active',
+              plan: defaultFreePlan
+            }
+      };
+    });
+    console.log(formattedUsers);
     res.json({
       success: true,
-      data: users,
+      data: formattedUsers,
       pagination: {
         totalItems: count,
         totalPages: Math.ceil(count / limit),
@@ -750,7 +810,11 @@ const getAllUsers = async (req, res) => {
     });
   } catch (error) {
     console.error('Get all users error:', error);
-    res.status(500).json({ success: false, message: 'Failed to retrieve users' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to retrieve users',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 

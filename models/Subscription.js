@@ -36,7 +36,15 @@ const Subscription = sequelize.define('Subscription', {
       model: 'plans',
       key: 'id'
     }
-  }
+  },
+  is_unlimited: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  admin_assigned: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
 }, {
   timestamps: true,
   createdAt: 'created_at',
