@@ -231,7 +231,6 @@ const getAllProjectsWithUser = async (req, res) => {
       ],
       order: [['createdAt', 'DESC']] 
     });
-
     res.json({
       success: true,
       count: projects.length,

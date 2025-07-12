@@ -797,7 +797,6 @@ const getAllUsers = async (req, res) => {
             }
       };
     });
-    console.log(formattedUsers);
     res.json({
       success: true,
       data: formattedUsers,

@@ -2,6 +2,8 @@ const ApiKey = require('../models/ApiKey');
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 const { getActiveApiKeyLimit } = require('../middleware/planLimiter');
+const db = require('../models');
+const User = require('../models/User');
 
 const CRYPTO_CONFIG = {
   keyLength: 32,
@@ -136,6 +138,52 @@ const checkApiKeyScope = requiredScope => (req, res, next) => {
   next();
 };
 
+const listAllApiKeys = async (req, res) => {
+  try {
+    const apikeys = await ApiKey.findAll({
+      include: [
+        {
+          model: User,
+          as: 'Users',  
+          attributes: ['id', 'name', 'email'] 
+        }
+      ],
+      order: [['created_at', 'DESC']] 
+    });
+    res.json({
+      success: true,
+      count: apikeys.length,
+      data: apikeys
+    });
+  } catch (error) {
+    console.error('Error retrieving apikeys with users:', error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+const toggleApiKeyStatus = async (req, res) => {
+  try {
+    const apiKey = await ApiKey.findByPk(req.params.id);
+    
+    if (!apiKey) {
+      return handleResponse(res, 404, { message: RESPONSE_MESSAGES.notFound });
+    }
+
+    await apiKey.update({ isActive: !apiKey.isActive });
+
+    return handleResponse(res, 200, { 
+      message: `API key ${apiKey.isActive ? 'enabled' : 'disabled'} successfully`,
+      data: { isActive: apiKey.isActive }
+    });
+  } catch (error) {
+    return handleError(res, 'toggle API key status', error);
+  }
+};
+
 const errorHandler = (err, _, res, __) => {
   const status = err.status || 500;
   return handleResponse(res, status, {
@@ -151,5 +199,7 @@ module.exports = {
   authenticateWithApiKey,
   checkApiKeyScope,
   errorHandler,
+  listAllApiKeys,
+  toggleApiKeyStatus,
   _internal: { generateSecureKey, hashKey, normalizeScopes }
 };

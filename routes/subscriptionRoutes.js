@@ -9,6 +9,6 @@ router.get('/history', requireAuth, subscriptionController.getUserSubscriptions)
 router.get('/status', requireAuth, subscriptionController.getSubscriptionStatus);
 router.get('/all', subscriptionController.getAllSubscriptions);
 router.put('/:id/CancelByAdmin', subscriptionController.cancelSubscriptionByAdmin);
-
+router.post('/assign', subscriptionController.assignPlanToUser);
 
 module.exports = router;

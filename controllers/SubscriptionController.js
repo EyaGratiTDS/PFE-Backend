@@ -361,11 +361,10 @@ const cancelSubscriptionByAdmin = async (req, res) => {
   }
 };
 
-/*const assignPlanToUser = async (req, res) => {
+const assignPlanToUser = async (req, res) => {
   try {
     const { userId, planId, duration, unit = 'days' } = req.body;
 
-    // Validation des données
     if (!userId || !planId) {
       return res.status(400).json({
         success: false,
@@ -389,25 +388,51 @@ const cancelSubscriptionByAdmin = async (req, res) => {
       });
     }
 
-    await Subscription.update(
-      { status: 'expired' },
-      {
-        where: {
-          user_id: userId,
-          status: 'active'
-        }
+    const existingSubscription = await Subscription.findOne({
+      where: {
+        user_id: userId,
+        status: 'active'
       }
-    );
+    });
+
+    if (plan.name.toLowerCase() === 'free') {
+      if (existingSubscription) {
+        await existingSubscription.update({
+          status: 'canceled',
+          end_date: new Date()
+        });
+        
+        await SubscriptionNotificationService.sendSubscriptionStatusNotification(
+          existingSubscription, 
+          'canceled'
+        );
+      }
+      
+      return res.status(200).json({
+        success: true,
+        message: `User downgraded to Free plan. Active subscription canceled.`
+      });
+    }
+
+    if (existingSubscription) {
+      await existingSubscription.update({
+        status: 'canceled',
+        end_date: new Date()
+      });
+      
+      await SubscriptionNotificationService.sendSubscriptionStatusNotification(
+        existingSubscription, 
+        'canceled'
+      );
+    }
 
     const startDate = new Date();
-    let endDate = null;
-    let isUnlimited = false;
+    let endDate = new Date(startDate);
 
     if (duration === 'unlimited') {
-      isUnlimited = true;
+      endDate.setFullYear(endDate.getFullYear() + 10);
     } else if (duration && unit) {
       const durationValue = parseInt(duration);
-      endDate = new Date(startDate);
       
       switch(unit) {
         case 'days':
@@ -437,22 +462,24 @@ const cancelSubscriptionByAdmin = async (req, res) => {
       plan_id: planId,
       start_date: startDate,
       end_date: endDate,
-      is_unlimited: isUnlimited,
-      status: 'active',
-      admin_assigned: true
+      status: 'active'
     });
 
     if (SubscriptionNotificationService.sendAdminAssignedNotification) {
+      const durationText = duration === 'unlimited' 
+        ? 'unlimited' 
+        : `${duration} ${unit}`;
+        
       await SubscriptionNotificationService.sendAdminAssignedNotification(
         user, 
         plan, 
-        isUnlimited ? null : endDate
+        durationText
       );
     }
 
     res.status(201).json({
       success: true,
-      message: `Plan "${plan.name}" successfully assigned to user`,
+      message: `Plan "${plan.name}" (${duration} ${unit}) successfully assigned to user`,
       data: newSubscription
     });
 
@@ -464,7 +491,7 @@ const cancelSubscriptionByAdmin = async (req, res) => {
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
-};*/
+};
 
 module.exports = {
   cancelSubscription,
@@ -473,5 +500,6 @@ module.exports = {
   getUserSubscriptions, 
   getSubscriptionStatus,
   getAllSubscriptions,
-  cancelSubscriptionByAdmin
+  cancelSubscriptionByAdmin,
+  assignPlanToUser
 };
