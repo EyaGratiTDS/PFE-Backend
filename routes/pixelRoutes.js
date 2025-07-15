@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pixelController = require('../controllers/pixelController');
-const { requireAuth } = require('../middleware/authMiddleware');
+const { requireAuth, requireAuthSuperAdmin } = require('../middleware/authMiddleware');
 const rateLimit = require('express-rate-limit');
 
 const trackLimiter = rateLimit({
@@ -13,11 +13,11 @@ const trackLimiter = rateLimit({
   }
 });
 
-router.put('/:id/toggle-status', pixelController.toggleBlocked);
+router.put('/:id/toggle-status', requireAuthSuperAdmin, pixelController.toggleBlocked);
 router.post('/', requireAuth, pixelController.createPixel);
 router.put('/:pixelId', requireAuth, pixelController.updatePixel);
 router.delete('/:pixelId', requireAuth, pixelController.deletePixel);
-router.get('/pixels', pixelController.getPixels);
+router.get('/pixels', requireAuthSuperAdmin, pixelController.getPixels);
 router.get('/user', requireAuth, pixelController.getUserPixels);
 router.get('/:pixelId', requireAuth, pixelController.getPixelById);
 router.get('/vcard/:vcardId', requireAuth, pixelController.getPixelsByVCard);

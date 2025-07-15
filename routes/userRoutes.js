@@ -18,7 +18,7 @@ router.post('/two-factor/verify', authMiddleware.requireAuth, userController.ver
 router.post('/two-factor/disable', authMiddleware.requireAuth, userController.disableTwoFactor);
 router.post('/two-factor/login', userController.verifyTwoFactorLogin);
 router.delete('/me', authMiddleware.requireAuth, userController.deleteAccount);
-router.get('/superadmin/users', authMiddleware.requireAuth, authMiddleware.requireSuperAdmin, userController.getAllUsers);
-router.put('/superadmin/users/:id/status', authMiddleware.requireAuth, authMiddleware.requireSuperAdmin, userController.toggleUserStatus);
+router.get('/superadmin/users', authMiddleware.requireAuthSuperAdmin, authMiddleware.requireSuperAdmin, userController.getAllUsers);
+router.put('/superadmin/users/:id/status', authMiddleware.requireAuthSuperAdmin, authMiddleware.requireSuperAdmin, userController.toggleUserStatus);
 
 module.exports = router;

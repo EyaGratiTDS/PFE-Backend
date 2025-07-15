@@ -15,28 +15,38 @@ passport.use(new GoogleStrategy({
 async (req, accessToken, refreshToken, profile, done) => {
   try {    
     if (!profile.emails || !profile.emails[0]) {
-      throw new Error('No email provided by Google');
+      console.error('No email provided by Google profile');
+      return done(new Error('No email provided by Google'), null);
     }
 
+    console.log('Processing Google auth for:', profile.emails[0].value);
+    
     const authResult = await userController.handleGoogleAuth(req, req.res, profile);
+    
     if (!authResult.success) {
+      console.error('Google auth failed:', authResult.message);
       return done(new Error(authResult.message), null);
     }
-    return done(null,  {
+    
+    console.log('Google auth successful for user:', authResult.user.email);
+    
+    return done(null, {
       token: authResult.token,
       user: authResult.user
     });
   } catch (error) {
-    console.error('Google auth error:', error);
+    console.error('Google auth strategy error:', error);
     return done(error, null);
   }
 }));
 
-passport.serializeUser((user, done) => {
+passport.serializeUser((userData, done) => {
+  // Vérifier si userData contient un objet user ou est directement un utilisateur
+  const user = userData.user || userData;
   done(null, {
-    id: user.user?.id,
-    email: user.user?.email,
-    role: user.user?.role
+    id: user.id,
+    email: user.email,
+    role: user.role
   });
 });
 
