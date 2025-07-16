@@ -1,7 +1,5 @@
 const sgMail = require('@sendgrid/mail');
 require('dotenv').config(); 
-const User = require('../models/User');
-const ActivityLogController = require('../controllers/ActivityLogController');
 
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);

@@ -167,6 +167,7 @@ const getAllPlans = async (req, res) => {
       where,
       order: [['price', 'ASC']]
     });
+    console.log(plans);
 
     res.json({
       success: true,
