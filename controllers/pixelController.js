@@ -254,8 +254,11 @@ const getUserPixels = async (req, res) => {
       include: [{
         model: VCard,
         as: "VCard",
-        where: { userId, is_blocked: false },
-        attributes: ['id', 'name']
+        where: { 
+          userId,
+          is_active: true  
+        },
+        attributes: ['id', 'name', 'is_active', 'status']
       }]
     });
 
