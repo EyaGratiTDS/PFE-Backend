@@ -152,7 +152,6 @@ describe('User Routes', () => {
         .get('/api/users/invalid-id')
         .set('Authorization', `Bearer ${authToken}`);
 
-      // The route should handle invalid IDs gracefully
       expect(response.status).toBeGreaterThanOrEqual(400);
     });
   });
@@ -174,7 +173,7 @@ describe('User Routes', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           currentPassword: '',
-          newPassword: '123' // Too short
+          newPassword: '123'
         });
 
       expectErrorResponse(response);

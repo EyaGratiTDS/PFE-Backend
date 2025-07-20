@@ -3,7 +3,6 @@ const express = require('express');
 const subscriptionRoutes = require('../../routes/subscriptionRoutes');
 const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
 jest.mock('../../middleware/authMiddleware', () => (req, res, next) => {
   req.user = { id: 1, email: 'test@example.com' };

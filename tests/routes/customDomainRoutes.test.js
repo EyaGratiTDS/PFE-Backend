@@ -3,7 +3,6 @@ const express = require('express');
 const customDomainRoutes = require('../../routes/customDomainRoutes');
 const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
 jest.mock('../../middleware/authMiddleware', () => (req, res, next) => {
   req.user = { id: 1, email: 'test@example.com' };
@@ -301,7 +300,6 @@ describe('Custom Domain Routes', () => {
         is_verified: false
       });
 
-      // Mock DNS failure
       jest.doMock('dns', () => ({
         resolve: jest.fn((domain, type, callback) => {
           callback(new Error('DNS resolution failed'));

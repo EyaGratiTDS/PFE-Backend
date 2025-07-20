@@ -3,13 +3,11 @@ const express = require('express');
 const activityLogController = require('../../controllers/ActivityLogController');
 const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
 
 const app = express();
 app.use(express.json());
 
-// Configuration des routes de test
 app.get('/activity-logs', activityLogController.getActivityLogs);
 app.post('/activity-logs', activityLogController.createActivityLog);
 app.get('/activity-logs/:id', activityLogController.getActivityLogById);
@@ -256,7 +254,6 @@ describe('ActivityLogController', () => {
 
       expectSuccessResponse(response);
       
-      // Verify sensitive fields are not stored
       const createCall = mockModels.ActivityLog.create.mock.calls[0][0];
       expect(createCall.details).not.toHaveProperty('oldPassword');
       expect(createCall.details).not.toHaveProperty('newPassword');
@@ -383,14 +380,12 @@ describe('ActivityLogController', () => {
 
   describe('GET /activity-logs/stats/summary', () => {
     test('should get activity summary successfully', async () => {
-      // Mock various counts for different time periods
       mockModels.ActivityLog.count
-        .mockResolvedValueOnce(5)   // today
-        .mockResolvedValueOnce(25)  // this week
-        .mockResolvedValueOnce(100) // this month
-        .mockResolvedValueOnce(500); // all time
+        .mockResolvedValueOnce(5)   
+        .mockResolvedValueOnce(25)  
+        .mockResolvedValueOnce(100) 
+        .mockResolvedValueOnce(500);
 
-      // Mock activity breakdown
       mockModels.ActivityLog.findAll.mockResolvedValue([
         { action: 'vcard.create', count: 10 },
         { action: 'vcard.view', count: 150 },
@@ -435,8 +430,8 @@ describe('ActivityLogController', () => {
     test('should get entity type breakdown', async () => {
       mockModels.ActivityLog.count.mockResolvedValue(100);
       mockModels.ActivityLog.findAll
-        .mockResolvedValueOnce([]) // actions
-        .mockResolvedValueOnce([   // entity types
+        .mockResolvedValueOnce([]) 
+        .mockResolvedValueOnce([   
           { entityType: 'VCard', count: 80 },
           { entityType: 'User', count: 15 },
           { entityType: 'Plan', count: 5 }
@@ -453,7 +448,7 @@ describe('ActivityLogController', () => {
     test('should get hourly activity distribution', async () => {
       mockModels.ActivityLog.count.mockResolvedValue(100);
       mockModels.ActivityLog.findAll
-        .mockResolvedValueOnce([]) // actions
+        .mockResolvedValueOnce([]) 
         .mockResolvedValueOnce(Array.from({ length: 24 }, (_, hour) => ({
           hour,
           count: Math.floor(Math.random() * 10)

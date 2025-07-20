@@ -10,11 +10,11 @@ const User = sequelize.define('Users', {
   },
   name: {
     type: DataTypes.STRING,
-    allowNull: false
+    allowNull: true 
   },
   email: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true 
   },
   password: {
     type: DataTypes.STRING,
@@ -67,6 +67,47 @@ const User = sequelize.define('Users', {
     type: DataTypes.BOOLEAN,
     defaultValue: true
   },
+  ipAddress: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  location: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  language: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  browser: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  os: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  visitCount: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1
+  },
+  lastVisit: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    defaultValue: DataTypes.NOW
+  },
+  entryTime: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  exitTime: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  duration: {
+    type: DataTypes.INTEGER, 
+    allowNull: true
+  }
 }, {
   timestamps: true,
   tableName: 'users',

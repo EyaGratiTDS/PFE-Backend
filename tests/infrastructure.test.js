@@ -1,4 +1,3 @@
-// Test simple pour valider l'infrastructure Jest
 describe('Infrastructure Test', () => {
   test('Jest is working', () => {
     expect(true).toBe(true);
