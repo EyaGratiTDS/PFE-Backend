@@ -41,7 +41,6 @@ async (req, accessToken, refreshToken, profile, done) => {
 }));
 
 passport.serializeUser((userData, done) => {
-  // Vérifier si userData contient un objet user ou est directement un utilisateur
   const user = userData.user || userData;
   done(null, {
     id: user.id,

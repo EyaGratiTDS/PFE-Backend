@@ -37,7 +37,7 @@ describe('Test Helpers', () => {
     const vcard = createTestVCard();
     expect(vcard).toHaveProperty('name');
     expect(vcard).toHaveProperty('url');
-    expect(vcard).toHaveProperty('is_active'); // Corrigé pour correspondre à la structure réelle
+    expect(vcard).toHaveProperty('is_active');
   });
 
   test('expectSuccessResponse validates successful responses', () => {
@@ -46,7 +46,6 @@ describe('Test Helpers', () => {
       body: { success: true, data: { id: 1 } }
     };
     
-    // Should not throw
     expect(() => expectSuccessResponse(mockResponse)).not.toThrow();
   });
 
@@ -56,7 +55,6 @@ describe('Test Helpers', () => {
       body: { success: false, message: 'Bad request' }
     };
     
-    // Should not throw
     expect(() => expectErrorResponse(mockResponse, 400, 'Bad request')).not.toThrow();
   });
 });

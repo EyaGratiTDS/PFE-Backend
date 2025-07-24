@@ -4,11 +4,9 @@ const planController = require('../../controllers/PlanController');
 const { createMockModels } = require('../utils/mockModels');
 const { 
   createTestPlan, 
-  createTestToken, 
   expectSuccessResponse, 
   expectErrorResponse,
   expectValidationError,
-  expectUnauthorizedError
 } = require('../utils/testHelpers');
 
 describe('PlanController', () => {
@@ -19,11 +17,9 @@ describe('PlanController', () => {
     models = createMockModels();
     await models.sequelize.sync({ force: true });
 
-    // Configuration de l'app Express pour les tests
     app = express();
     app.use(express.json());
     
-    // Routes de test
     app.get('/plans', planController.getAllPlans);
     app.get('/plans/free', planController.getFreePlan);
     app.get('/plans/search', planController.searchPlans);
@@ -32,7 +28,6 @@ describe('PlanController', () => {
     app.put('/plans/:id', planController.validatePlanType, planController.updatePlan);
     app.delete('/plans/:id', planController.deletePlan);
     
-    // Mock du middleware requireAuthSuperAdmin pour les tests
     app.patch('/plans/:id/toggle-status', (req, res, next) => {
       req.user = { role: 'superAdmin' };
       next();
@@ -40,7 +35,6 @@ describe('PlanController', () => {
   });
 
   beforeEach(async () => {
-    // Nettoyer la base de données avant chaque test
     await models.Plan.destroy({ where: {} });
   });
 
@@ -50,10 +44,9 @@ describe('PlanController', () => {
 
   describe('GET /plans - getAllPlans', () => {
     test('should return all plans successfully', async () => {
-      // Créer des plans de test
       await models.Plan.create(createTestPlan({ name: 'Free', price: 0 }));
-      await models.Plan.create(createTestPlan({ name: 'Basic', price: 9.99 }));
-      await models.Plan.create(createTestPlan({ name: 'Pro', price: 19.99 }));
+      await models.Plan.create(createTestPlan({ name: 'Basic', price: 12.00 }));
+      await models.Plan.create(createTestPlan({ name: 'Pro', price: 29.00 }));
 
       const response = await request(app).get('/plans');
 
@@ -72,7 +65,6 @@ describe('PlanController', () => {
     });
 
     test('should handle database error gracefully', async () => {
-      // Mock une erreur de base de données
       jest.spyOn(models.Plan, 'findAll').mockRejectedValueOnce(new Error('Database error'));
 
       const response = await request(app).get('/plans');
@@ -114,13 +106,13 @@ describe('PlanController', () => {
       await models.Plan.create(createTestPlan({ 
         name: 'Basic', 
         description: 'Plan basique',
-        price: 9.99,
+        price: 12.00,
         is_active: true
       }));
       await models.Plan.create(createTestPlan({ 
         name: 'Pro', 
         description: 'Plan professionnel',
-        price: 19.99,
+        price: 29.00,
         is_active: false
       }));
     });
@@ -169,7 +161,7 @@ describe('PlanController', () => {
       const planData = {
         name: 'Basic',
         description: 'Plan basique',
-        price: 9.99,
+        price: 12.00,
         currency: 'USD',
         type: 'premium'
       };
@@ -180,14 +172,14 @@ describe('PlanController', () => {
 
       expectSuccessResponse(response);
       expect(response.body.plan.name).toBe(planData.name);
-      expect(response.body.plan.price).toBe('9.99');
+      expect(response.body.plan.price).toBe('12.00');
     });
 
     test('should reject invalid plan type', async () => {
       const planData = {
         name: 'InvalidType',
         description: 'Plan invalide',
-        price: 9.99
+        price: 12.00
       };
 
       const response = await request(app)
@@ -242,7 +234,7 @@ describe('PlanController', () => {
       const updateData = {
         name: 'Basic',
         description: 'Plan mis à jour',
-        price: 12.99
+        price: 12.00
       };
 
       const response = await request(app)
@@ -290,7 +282,6 @@ describe('PlanController', () => {
       expectSuccessResponse(response);
       expect(response.body.message).toBe('Plan supprimé avec succès');
 
-      // Vérifier que le plan a été supprimé
       const deletedPlan = await models.Plan.findByPk(plan.id);
       expect(deletedPlan).toBeNull();
     });

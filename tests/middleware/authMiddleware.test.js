@@ -24,7 +24,6 @@ describe('AuthMiddleware', () => {
     };
     next = jest.fn();
 
-    // Clear tous les mocks
     jest.clearAllMocks();
   });
 
@@ -34,11 +33,9 @@ describe('AuthMiddleware', () => {
 
   describe('requireAuth', () => {
     test('should authenticate with valid JWT token in headers', async () => {
-      // Créer un utilisateur de test
       const userData = await createTestUser();
       const user = await models.User.create(userData);
       
-      // Créer un token valide
       const token = createTestToken({ id: user.id, email: user.email, role: user.role });
       req.headers.authorization = `Bearer ${token}`;
 

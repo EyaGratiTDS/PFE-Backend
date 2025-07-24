@@ -3,7 +3,6 @@ const express = require('express');
 const subscriptionController = require('../../controllers/SubscriptionController');
 const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
 jest.mock('stripe', () => ({
   subscriptions: {
@@ -25,7 +24,6 @@ jest.mock('stripe', () => ({
 const app = express();
 app.use(express.json());
 
-// Configuration des routes de test
 app.get('/subscriptions', subscriptionController.getUserSubscriptions);
 app.get('/subscriptions/current', subscriptionController.getUserSubscription);
 app.delete('/subscriptions/cancel', subscriptionController.cancelSubscription);
@@ -42,7 +40,8 @@ describe('SubscriptionController', () => {
   let stripe;
 
   beforeEach(() => {
-    mockModels = require('../utils/mockModels')();
+    const { createMockModels } = require('../utils/mockModels');
+    mockModels = createMockModels();
     testUser = createTestUser();
     testSubscription = {
       id: 1,

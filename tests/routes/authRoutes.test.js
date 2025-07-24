@@ -3,13 +3,7 @@ const express = require('express');
 const passport = require('passport');
 const authRoutes = require('../../routes/authRoutes');
 const { createMockModels } = require('../utils/mockModels');
-const { 
-  createTestUser,
-  expectSuccessResponse,
-  expectErrorResponse 
-} = require('../utils/testHelpers');
 
-// Mock passport pour les tests
 jest.mock('passport');
 
 describe('AuthRoutes', () => {
@@ -20,35 +14,28 @@ describe('AuthRoutes', () => {
     models = createMockModels();
     await models.sequelize.sync({ force: true });
 
-    // Configuration de l'app Express pour les tests
     app = express();
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     
-    // Mock du middleware de session
     app.use((req, res, next) => {
       req.session = {};
       next();
     });
     
-    // Mock de passport
     app.use((req, res, next) => {
       req.logout = jest.fn((cb) => cb && cb());
       next();
     });
     
-    // Routes de test
     app.use('/auth', authRoutes);
   });
 
   beforeEach(async () => {
-    // Nettoyer la base de données avant chaque test
     await models.User.destroy({ where: {} });
     
-    // Réinitialiser les mocks
     jest.clearAllMocks();
     
-    // Configuration des mocks par défaut
     process.env.FRONTEND_URL = 'http://localhost:5173';
     process.env.GOOGLE_CLIENT_ID = 'test_google_client_id';
     process.env.GOOGLE_CLIENT_SECRET = 'test_google_client_secret';
@@ -61,10 +48,8 @@ describe('AuthRoutes', () => {
 
   describe('GET /auth/google', () => {
     test('should redirect to Google OAuth', async () => {
-      // Mock passport.authenticate pour Google
       passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Simuler une redirection vers Google
           res.redirect('https://accounts.google.com/oauth/authorize?client_id=test');
         };
       });
@@ -92,7 +77,6 @@ describe('AuthRoutes', () => {
         }
       };
 
-      // Mock passport.authenticate pour le callback
       passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
         return (req, res, next) => {
           req.user = mockUser;
@@ -158,10 +142,8 @@ describe('AuthRoutes', () => {
     });
 
     test('should handle authentication failure', async () => {
-      // Mock passport.authenticate pour simuler un échec
       passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Simuler un échec d'authentification
           res.redirect(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
         };
       });
@@ -175,7 +157,7 @@ describe('AuthRoutes', () => {
     test('should handle missing user or token', async () => {
       passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          req.user = null; // Pas d'utilisateur
+          req.user = null; 
           next();
         };
       });
@@ -195,7 +177,6 @@ describe('AuthRoutes', () => {
               email: 'test@example.com',
               role: 'admin'
             }
-            // Pas de token
           };
           next();
         };
@@ -210,7 +191,6 @@ describe('AuthRoutes', () => {
     test('should handle callback errors gracefully', async () => {
       passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Simuler une erreur dans le callback
           throw new Error('Callback error');
         };
       });
@@ -247,7 +227,6 @@ describe('AuthRoutes', () => {
       expect(location).toContain('token=');
       expect(location).toContain('user=');
       
-      // Vérifier que les données sont encodées
       expect(decodeURIComponent(location)).toContain('test+user@example.com');
       expect(decodeURIComponent(location)).toContain('Test User with Spaces');
     });
@@ -285,7 +264,6 @@ describe('AuthRoutes', () => {
         };
       });
 
-      // Mock du gestionnaire d'erreur global
       app.use((err, req, res, next) => {
         res.redirect(`${process.env.FRONTEND_URL}/sign-in?error=strategy_error`);
       });
@@ -299,7 +277,6 @@ describe('AuthRoutes', () => {
     test('should handle network errors gracefully', async () => {
       passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Simuler une erreur réseau
           const error = new Error('Network error');
           error.code = 'NETWORK_ERROR';
           throw error;

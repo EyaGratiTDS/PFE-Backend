@@ -41,7 +41,7 @@ describe('PixelController', () => {
     app.post('/pixels/:pixelId/track', pixelController.trackEvent);
     app.get('/pixels/vcard/:vcardId', pixelController.getPixelsByVCard);
     app.get('/pixels', pixelController.getPixels);
-    app.patch('/pixels/:id/toggle-blocked', pixelController.toggleBlocked);
+    app.put('/pixels/:id/toggle-blocked', pixelController.toggleBlocked);
   });
 
   beforeEach(async () => {
@@ -368,7 +368,7 @@ describe('PixelController', () => {
     });
   });
 
-  describe('PATCH /pixels/:id/toggle-blocked - toggleBlocked', () => {
+  describe('PUT /pixels/:id/toggle-blocked - toggleBlocked', () => {
     test('should toggle pixel blocked status successfully', async () => {
       const user = await models.User.create(await createTestUser());
       const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
@@ -377,7 +377,7 @@ describe('PixelController', () => {
         is_blocked: false
       }));
 
-      const response = await request(app).patch(`/pixels/${pixel.id}/toggle-blocked`);
+      const response = await request(app).put(`/pixels/${pixel.id}/toggle-blocked`);
 
       expectSuccessResponse(response);
       expect(response.body.data.is_blocked).toBe(true);
@@ -392,7 +392,7 @@ describe('PixelController', () => {
         is_blocked: true
       }));
 
-      const response = await request(app).patch(`/pixels/${pixel.id}/toggle-blocked`);
+      const response = await request(app).put(`/pixels/${pixel.id}/toggle-blocked`);
 
       expectSuccessResponse(response);
       expect(response.body.data.is_blocked).toBe(false);
@@ -400,7 +400,7 @@ describe('PixelController', () => {
     });
 
     test('should return 404 for non-existent pixel', async () => {
-      const response = await request(app).patch('/pixels/999/toggle-blocked');
+      const response = await request(app).put('/pixels/999/toggle-blocked');
 
       expectNotFoundError(response, 'Pixel not found');
     });

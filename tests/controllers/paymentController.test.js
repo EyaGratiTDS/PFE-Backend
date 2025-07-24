@@ -3,7 +3,6 @@ const express = require('express');
 const paymentController = require('../../controllers/PaymentController');
 const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
 jest.mock('stripe', () => ({
   customers: {
@@ -28,7 +27,6 @@ jest.mock('stripe', () => ({
 const app = express();
 app.use(express.json());
 
-// Configuration des routes de test
 app.get('/payments', paymentController.getPayments);
 app.post('/payments/create-intent', paymentController.createPaymentIntent);
 app.post('/payments/confirm', paymentController.confirmPayment);
@@ -42,7 +40,8 @@ describe('PaymentController', () => {
   let stripe;
 
   beforeEach(() => {
-    mockModels = require('../utils/mockModels')();
+    const { createMockModels } = require('../utils/mockModels');
+    mockModels = createMockModels();
     testUser = createTestUser();
     authToken = createTestToken({ id: 1, email: testUser.email });
     stripe = require('stripe');

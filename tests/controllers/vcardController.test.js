@@ -3,14 +3,12 @@ const express = require('express');
 const vcardController = require('../../controllers/vcardController');
 const { createTestToken, createTestUser, createTestVCard, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
 jest.mock('../../services/uploadService');
 
 const app = express();
 app.use(express.json());
 
-// Configuration des routes de test
 app.get('/vcards', vcardController.getAllVCards);
 app.get('/vcards/:id', vcardController.getVCardById);
 app.post('/vcards', vcardController.createVCard);
@@ -26,7 +24,8 @@ describe('VCardController', () => {
   let testVCard;
 
   beforeEach(() => {
-    mockModels = require('../utils/mockModels')();
+    const { createMockModels } = require('../utils/mockModels');
+    mockModels = createMockModels();
     testUser = createTestUser();
     testVCard = createTestVCard({ userId: 1 });
     authToken = createTestToken({ id: 1, email: testUser.email });

@@ -57,11 +57,13 @@ const handleOperation = async (res, operation, context) => {
 };
 
 const initNotificationService = () => {
-  cron.schedule('0 0 * * *', () => {
-    console.log('Running notification cleanup...');
-    Notification.deleteExpired().catch(console.error);
-  });
-  console.log('Notification service initialized');
+  if (process.env.NODE_ENV !== 'test') {
+    cron.schedule('0 0 * * *', () => {
+      console.log('Running notification cleanup...');
+      Notification.deleteExpired().catch(console.error);
+    });
+    console.log('Notification service initialized');
+  }
 };
 
 const setupNotificationEvents = (app) => ({
@@ -291,5 +293,6 @@ module.exports = {
   sendVcardViewNotification
 };
 
-initNotificationService();
-const notificationEvents = setupNotificationEvents(require('express')());
+if (process.env.NODE_ENV !== 'test') {
+  initNotificationService();
+}

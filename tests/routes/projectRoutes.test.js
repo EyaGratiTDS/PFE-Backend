@@ -11,7 +11,7 @@ jest.mock('../../middleware/authMiddleware', () => (req, res, next) => {
 
 const app = express();
 app.use(express.json());
-app.use('/api/projects', projectRoutes);
+app.use('/project', projectRoutes);
 
 describe('Project Routes', () => {
   let mockModels;
@@ -19,14 +19,15 @@ describe('Project Routes', () => {
   let testUser;
 
   beforeEach(() => {
-    mockModels = require('../utils/mockModels')();
+    const { createMockModels } = require('../utils/mockModels');
+    mockModels = createMockModels();
     testUser = createTestUser();
     authToken = createTestToken({ id: 1, email: testUser.email });
 
     jest.clearAllMocks();
   });
 
-  describe('GET /api/projects', () => {
+  describe('GET /project', () => {
     test('should get user projects', async () => {
       const projects = [
         {
@@ -39,7 +40,7 @@ describe('Project Routes', () => {
       mockModels.Project.findAll.mockResolvedValue(projects);
 
       const response = await request(app)
-        .get('/api/projects')
+        .get('/project')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
@@ -50,14 +51,14 @@ describe('Project Routes', () => {
       mockModels.Project.findAll.mockResolvedValue([]);
 
       const response = await request(app)
-        .get('/api/projects?status=active')
+        .get('/project?status=active')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
     });
   });
 
-  describe('POST /api/projects', () => {
+  describe('POST /project', () => {
     test('should create new project', async () => {
       const projectData = {
         name: 'New Project',
@@ -71,7 +72,7 @@ describe('Project Routes', () => {
       });
 
       const response = await request(app)
-        .post('/api/projects')
+        .post('/project')
         .set('Authorization', `Bearer ${authToken}`)
         .send(projectData);
 
@@ -81,7 +82,7 @@ describe('Project Routes', () => {
 
     test('should validate required fields', async () => {
       const response = await request(app)
-        .post('/api/projects')
+        .post('/project')
         .set('Authorization', `Bearer ${authToken}`)
         .send({});
 
@@ -89,7 +90,7 @@ describe('Project Routes', () => {
     });
   });
 
-  describe('GET /api/projects/:id', () => {
+  describe('GET /project/:id', () => {
     test('should get project by id', async () => {
       mockModels.Project.findOne.mockResolvedValue({
         id: 1,
@@ -98,7 +99,7 @@ describe('Project Routes', () => {
       });
 
       const response = await request(app)
-        .get('/api/projects/1')
+        .get('/project/1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
@@ -108,14 +109,14 @@ describe('Project Routes', () => {
       mockModels.Project.findOne.mockResolvedValue(null);
 
       const response = await request(app)
-        .get('/api/projects/999')
+        .get('/project/999')
         .set('Authorization', `Bearer ${authToken}`);
 
       expect(response.status).toBe(404);
     });
   });
 
-  describe('PUT /api/projects/:id', () => {
+  describe('PUT /project/:id', () => {
     test('should update project', async () => {
       const updateData = { name: 'Updated Project' };
       
@@ -127,7 +128,7 @@ describe('Project Routes', () => {
       mockModels.Project.update.mockResolvedValue([1]);
 
       const response = await request(app)
-        .put('/api/projects/1')
+        .put('/project/1')
         .set('Authorization', `Bearer ${authToken}`)
         .send(updateData);
 
@@ -135,7 +136,7 @@ describe('Project Routes', () => {
     });
   });
 
-  describe('DELETE /api/projects/:id', () => {
+  describe('DELETE /project/:id', () => {
     test('should delete project', async () => {
       mockModels.Project.findOne.mockResolvedValue({
         id: 1,
@@ -144,14 +145,14 @@ describe('Project Routes', () => {
       mockModels.Project.destroy.mockResolvedValue(1);
 
       const response = await request(app)
-        .delete('/api/projects/1')
+        .delete('/project/1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
     });
   });
 
-  describe('POST /api/projects/:id/duplicate', () => {
+  describe('POST /project/:id/duplicate', () => {
     test('should duplicate project', async () => {
       mockModels.Project.findOne.mockResolvedValue({
         id: 1,
@@ -165,7 +166,7 @@ describe('Project Routes', () => {
       });
 
       const response = await request(app)
-        .post('/api/projects/1/duplicate')
+        .post('/project/1/duplicate')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
@@ -181,7 +182,7 @@ describe('Project Routes', () => {
       ]);
 
       const response = await request(app)
-        .get('/api/projects/1/vcards')
+        .get('/project/1/vcards')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
@@ -197,7 +198,7 @@ describe('Project Routes', () => {
       mockModels.VCard.update.mockResolvedValue([1]);
 
       const response = await request(app)
-        .post('/api/projects/1/vcards')
+        .post('/project/1/vcards')
         .set('Authorization', `Bearer ${authToken}`)
         .send({ vcardId: 1 });
 
@@ -214,7 +215,7 @@ describe('Project Routes', () => {
       mockModels.VCard.update.mockResolvedValue([1]);
 
       const response = await request(app)
-        .delete('/api/projects/1/vcards/1')
+        .delete('/project/1/vcards/1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
@@ -226,7 +227,7 @@ describe('Project Routes', () => {
       mockModels.Project.findAll.mockRejectedValue(new Error('Database error'));
 
       const response = await request(app)
-        .get('/api/projects')
+        .get('/project')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectErrorResponse(response);
@@ -234,7 +235,7 @@ describe('Project Routes', () => {
 
     test('should handle authorization errors', async () => {
       const response = await request(app)
-        .get('/api/projects/1');
+        .get('/project/1');
 
       expect(response.status).toBeGreaterThanOrEqual(400);
     });

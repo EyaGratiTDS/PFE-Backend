@@ -1,6 +1,5 @@
 const request = require('supertest');
 const express = require('express');
-const { createTestToken } = require('../utils/testHelpers');
 
 describe('Activity Logs Routes - Working Tests', () => {
   let app;
@@ -88,7 +87,6 @@ describe('Activity Logs Routes - Working Tests', () => {
         }
       ];
       
-      // Filtrage
       if (action) {
         logs = logs.filter(log => log.action === action);
       }
@@ -97,7 +95,6 @@ describe('Activity Logs Routes - Working Tests', () => {
         logs = logs.filter(log => log.entityType === entityType);
       }
       
-      // Pagination
       const startIndex = parseInt(offset);
       const endIndex = startIndex + parseInt(limit);
       const paginatedLogs = logs.slice(startIndex, endIndex);
@@ -371,7 +368,6 @@ describe('Activity Logs Routes - Working Tests', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.data.length).toBeGreaterThan(0);
-      // Vérifier que les dates sont dans la plage
       response.body.data.forEach(log => {
         const logDate = new Date(log.createdAt);
         expect(logDate >= new Date('2024-01-02')).toBe(true);
@@ -484,7 +480,6 @@ describe('Activity Logs Routes - Working Tests', () => {
 
   describe('Activity Log Export', () => {
     test('should have export functionality', async () => {
-      // Test simple pour vérifier que l'endpoint existe
       const response = await request(app)
         .get('/activity-logs');
 
@@ -495,7 +490,6 @@ describe('Activity Logs Routes - Working Tests', () => {
 
   describe('Bulk Operations', () => {
     test('should handle bulk operations', async () => {
-      // Test simple pour vérifier que l'endpoint de base fonctionne
       const response = await request(app)
         .get('/activity-logs');
 

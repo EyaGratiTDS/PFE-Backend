@@ -3,21 +3,19 @@ const express = require('express');
 const blockController = require('../../controllers/blockController');
 const { createTestToken, createTestUser, createTestVCard, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
 jest.mock('../../services/uploadService');
 
 const app = express();
 app.use(express.json());
 
-// Configuration des routes de test
-app.get('/blocks', blockController.getAllBlocks);
-app.get('/blocks/:id', blockController.getBlockById);
-app.post('/blocks', blockController.createBlock);
-app.put('/blocks/:id', blockController.updateBlock);
-app.delete('/blocks/:id', blockController.deleteBlock);
-app.put('/blocks/:id/position', blockController.updateBlockPosition);
-app.post('/blocks/:id/duplicate', blockController.duplicateBlock);
+app.get('/block', blockController.getBlocksByVcardId[1]);
+app.get('/block/:id', blockController.getBlockById);
+app.post('/block', blockController.createBlock);
+app.put('/block/:id', blockController.updateBlock);
+app.delete('/block/:id', blockController.deleteBlock);
+app.get('/block/admin', blockController.getBlocksByVcardIdAdmin);
+app.putt('/block/:id/toggle-status', blockController.toggleBlock);
 
 describe('BlockController', () => {
   let mockModels;
@@ -27,7 +25,8 @@ describe('BlockController', () => {
   let testBlock;
 
   beforeEach(() => {
-    mockModels = require('../utils/mockModels')();
+    const { createMockModels } = require('../utils/mockModels');
+    mockModels = createMockModels();
     testUser = createTestUser();
     testVCard = createTestVCard({ userId: 1 });
     testBlock = {
@@ -43,18 +42,18 @@ describe('BlockController', () => {
     jest.clearAllMocks();
   });
 
-  describe('GET /blocks', () => {
-    test('should get all blocks for vcard', async () => {
-      const blocks = [
+  describe('GET /block', () => {
+    test('should get all block for vcard', async () => {
+      const block = [
         testBlock,
         { ...testBlock, id: 2, type: 'image', position: 2 }
       ];
 
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.Block.findAll.mockResolvedValue(blocks);
+      mockModels.Block.findAll.mockResolvedValue(block);
 
       const response = await request(app)
-        .get('/blocks?vcardId=1')
+        .get('/block?vcardId=1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
@@ -69,7 +68,7 @@ describe('BlockController', () => {
       mockModels.VCard.findOne.mockResolvedValue(null);
 
       const response = await request(app)
-        .get('/blocks?vcardId=1')
+        .get('/block?vcardId=1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectErrorResponse(response);
@@ -78,7 +77,7 @@ describe('BlockController', () => {
 
     test('should require vcardId parameter', async () => {
       const response = await request(app)
-        .get('/blocks')
+        .get('/block')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectErrorResponse(response);
@@ -86,13 +85,13 @@ describe('BlockController', () => {
     });
   });
 
-  describe('GET /blocks/:id', () => {
+  describe('GET /block/:id', () => {
     test('should get block by id', async () => {
       mockModels.Block.findOne.mockResolvedValue(testBlock);
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
 
       const response = await request(app)
-        .get('/blocks/1')
+        .get('/block/1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
@@ -103,14 +102,14 @@ describe('BlockController', () => {
       mockModels.Block.findOne.mockResolvedValue(null);
 
       const response = await request(app)
-        .get('/blocks/999')
+        .get('/block/999')
         .set('Authorization', `Bearer ${authToken}`);
 
       expect(response.status).toBe(404);
     });
   });
 
-  describe('POST /blocks', () => {
+  describe('POST /block', () => {
     test('should create text block successfully', async () => {
       const blockData = {
         vcardId: 1,
@@ -125,7 +124,7 @@ describe('BlockController', () => {
       mockModels.Block.create.mockResolvedValue(createdBlock);
 
       const response = await request(app)
-        .post('/blocks')
+        .post('/block')
         .set('Authorization', `Bearer ${authToken}`)
         .send(blockData);
 
@@ -152,7 +151,7 @@ describe('BlockController', () => {
       mockModels.Block.create.mockResolvedValue({ ...blockData, id: 1, position: 3 });
 
       const response = await request(app)
-        .post('/blocks')
+        .post('/block')
         .set('Authorization', `Bearer ${authToken}`)
         .send(blockData);
 
@@ -175,7 +174,7 @@ describe('BlockController', () => {
       mockModels.Block.create.mockResolvedValue({ ...blockData, id: 1, position: 1 });
 
       const response = await request(app)
-        .post('/blocks')
+        .post('/block')
         .set('Authorization', `Bearer ${authToken}`)
         .send(blockData);
 
@@ -184,7 +183,7 @@ describe('BlockController', () => {
 
     test('should validate required fields', async () => {
       const response = await request(app)
-        .post('/blocks')
+        .post('/block')
         .set('Authorization', `Bearer ${authToken}`)
         .send({});
 
@@ -201,7 +200,7 @@ describe('BlockController', () => {
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
 
       const response = await request(app)
-        .post('/blocks')
+        .post('/block')
         .set('Authorization', `Bearer ${authToken}`)
         .send(blockData);
 
@@ -210,7 +209,7 @@ describe('BlockController', () => {
     });
   });
 
-  describe('PUT /blocks/:id', () => {
+  describe('PUT /block/:id', () => {
     test('should update block successfully', async () => {
       const updateData = {
         content: { text: 'Updated text' }
@@ -224,7 +223,7 @@ describe('BlockController', () => {
       mockModels.Block.findOne.mockResolvedValueOnce(updatedBlock);
 
       const response = await request(app)
-        .put('/blocks/1')
+        .put('/block/1')
         .set('Authorization', `Bearer ${authToken}`)
         .send(updateData);
 
@@ -240,7 +239,7 @@ describe('BlockController', () => {
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
 
       const response = await request(app)
-        .put('/blocks/1')
+        .put('/block/1')
         .set('Authorization', `Bearer ${authToken}`)
         .send({ type: 'image' });
 
@@ -249,14 +248,14 @@ describe('BlockController', () => {
     });
   });
 
-  describe('DELETE /blocks/:id', () => {
+  describe('DELETE /block/:id', () => {
     test('should delete block successfully', async () => {
       mockModels.Block.findOne.mockResolvedValue(testBlock);
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
       mockModels.Block.update.mockResolvedValue([1]);
 
       const response = await request(app)
-        .delete('/blocks/1')
+        .delete('/block/1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
@@ -267,64 +266,63 @@ describe('BlockController', () => {
     });
   });
 
-  describe('PUT /blocks/:id/position', () => {
-    test('should update block position successfully', async () => {
-      mockModels.Block.findOne.mockResolvedValue(testBlock);
+  describe('GET /block/admin', () => {
+    test('should get all block for vcard', async () => {
+      const block = [
+        testBlock,
+        { ...testBlock, id: 2, type: 'image', position: 2 }
+      ];
+
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.Block.update.mockResolvedValue([1]);
+      mockModels.Block.findAll.mockResolvedValue(block);
 
       const response = await request(app)
-        .put('/blocks/1/position')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ position: 5 });
-
-      expectSuccessResponse(response);
-      expect(mockModels.Block.update).toHaveBeenCalledWith(
-        { position: 5 },
-        { where: { id: 1 } }
-      );
-    });
-
-    test('should validate position value', async () => {
-      mockModels.Block.findOne.mockResolvedValue(testBlock);
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
-
-      const response = await request(app)
-        .put('/blocks/1/position')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ position: -1 });
-
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Position must be a positive number');
-    });
-  });
-
-  describe('POST /blocks/:id/duplicate', () => {
-    test('should duplicate block successfully', async () => {
-      const duplicatedBlock = {
-        ...testBlock,
-        id: 2,
-        position: 2
-      };
-
-      mockModels.Block.findOne.mockResolvedValue(testBlock);
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.Block.count.mockResolvedValue(1);
-      mockModels.Block.create.mockResolvedValue(duplicatedBlock);
-
-      const response = await request(app)
-        .post('/blocks/1/duplicate')
+        .get('/block?vcardId=1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
-      expect(response.status).toBe(201);
-      expect(mockModels.Block.create).toHaveBeenCalledWith({
-        vcardId: testBlock.vcardId,
-        type: testBlock.type,
-        content: testBlock.content,
-        position: 2,
-        is_active: true
+      expect(response.body.data).toHaveLength(2);
+      expect(mockModels.Block.findAll).toHaveBeenCalledWith({
+        where: { vcardId: 1, is_active: true },
+        order: [['position', 'ASC']]
       });
+    });
+
+    test('should return error if vcard not owned by user', async () => {
+      mockModels.VCard.findOne.mockResolvedValue(null);
+
+      const response = await request(app)
+        .get('/block/admin?vcardId=1')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expectErrorResponse(response);
+      expect(response.body.message).toContain('VCard not found');
+    });
+
+    test('should require vcardId parameter', async () => {
+      const response = await request(app)
+        .get('/block/admin')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expectErrorResponse(response);
+      expect(response.body.message).toContain('VCard ID is required');
+    });
+  });
+
+  describe('PUT /block/:id/toggle-status', () => {
+    test('should toggle block status', async () => {
+      mockModels.Block.findByPk.mockResolvedValue(testBlock);
+      mockModels.Block.update.mockResolvedValue([1]);
+
+      const response = await request(app)
+        .put('/block/1/toggle-status')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expectSuccessResponse(response);
+      expect(mockModels.Block.update).toHaveBeenCalledWith(
+        { status: true }, 
+        { where: { id: 1 } }
+      );
     });
   });
 });

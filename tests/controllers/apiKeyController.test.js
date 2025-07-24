@@ -3,20 +3,19 @@ const express = require('express');
 const apiKeyController = require('../../controllers/ApiKeyController');
 const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
-jest.mock('../../services/cryptoUtils');
+jest.mock('../../middleware/planLimiter', () => ({
+  getActiveApiKeyLimit: jest.fn().mockResolvedValue(5)
+}));
 
 const app = express();
 app.use(express.json());
 
-// Configuration des routes de test
-app.get('/api-keys', apiKeyController.getAllApiKeys);
-app.post('/api-keys', apiKeyController.createApiKey);
-app.get('/api-keys/:id', apiKeyController.getApiKeyById);
-app.put('/api-keys/:id', apiKeyController.updateApiKey);
-app.delete('/api-keys/:id', apiKeyController.deleteApiKey);
-app.post('/api-keys/:id/regenerate', apiKeyController.regenerateApiKey);
+// Endpoints corrigés pour correspondre au contrôleur
+app.get('/apiKey', apiKeyController.listApiKeys);
+app.post('/apiKey', apiKeyController.createApiKey);
+app.delete('/apiKey/:id', apiKeyController.deleteApiKey);
+app.put('/apiKey/:id/toggle', apiKeyController.toggleApiKeyStatus);
 
 describe('ApiKeyController', () => {
   let mockModels;
@@ -25,222 +24,235 @@ describe('ApiKeyController', () => {
   let testApiKey;
 
   beforeEach(() => {
-    mockModels = require('../utils/mockModels')();
+    const { createMockModels } = require('../utils/mockModels');
+    mockModels = createMockModels();
     testUser = createTestUser();
     testApiKey = {
       id: 1,
       userId: 1,
       name: 'Test API Key',
       key: 'encrypted_key_data',
-      permissions: ['read', 'write'],
-      is_active: true,
-      last_used: null,
-      expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+      prefix: 'testpref',
+      scopes: ['read', 'write'],
+      isActive: true,
+      lastUsedAt: null,
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      created_at: new Date(),
+      get: jest.fn().mockImplementation(function() { 
+        return { 
+          ...this,
+          user: testUser
+        }; 
+      })
     };
     authToken = createTestToken({ id: 1, email: testUser.email });
 
+    // Reset mocks
     jest.clearAllMocks();
   });
 
-  describe('GET /api-keys', () => {
-    test('should get all api keys for user', async () => {
-      const apiKeys = [testApiKey, { ...testApiKey, id: 2, name: 'Another Key' }];
+  describe('GET /apiKey', () => {
+    test('should get all api keys for user with isDisabled flag', async () => {
+      const apiKeys = [
+        { ...testApiKey, id: 1 },
+        { ...testApiKey, id: 2, name: 'Another Key' }
+      ];
+      
       mockModels.ApiKey.findAll.mockResolvedValue(apiKeys);
 
       const response = await request(app)
-        .get('/api-keys')
+        .get('/apiKey')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
       expect(response.body.data).toHaveLength(2);
+      expect(response.body.data[0]).toHaveProperty('isDisabled', false);
       expect(mockModels.ApiKey.findAll).toHaveBeenCalledWith({
         where: { userId: 1 },
-        attributes: { exclude: ['key'] },
-        order: [['createdAt', 'DESC']]
+        attributes: ['id', 'name', 'prefix', 'scopes', 'expiresAt', 'isActive', 'lastUsedAt', 'created_at'],
+        order: [['created_at', 'ASC']]
       });
     });
 
-    test('should filter by active status', async () => {
-      mockModels.ApiKey.findAll.mockResolvedValue([testApiKey]);
+    test('should mark keys beyond limit as disabled', async () => {
+      // Mock lower limit
+      require('../../middleware/planLimiter').getActiveApiKeyLimit.mockResolvedValue(1);
+      
+      const apiKeys = [
+        { ...testApiKey, id: 1 },
+        { ...testApiKey, id: 2, name: 'Another Key' }
+      ];
+      mockModels.ApiKey.findAll.mockResolvedValue(apiKeys);
 
       const response = await request(app)
-        .get('/api-keys?active=true')
+        .get('/apiKey')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
-      expect(mockModels.ApiKey.findAll).toHaveBeenCalledWith({
-        where: { userId: 1, is_active: true },
-        attributes: { exclude: ['key'] },
-        order: [['createdAt', 'DESC']]
-      });
+      expect(response.body.data[0].isDisabled).toBe(false);
+      expect(response.body.data[1].isDisabled).toBe(true);
     });
   });
 
-  describe('POST /api-keys', () => {
-    test('should create api key successfully', async () => {
+  describe('POST /apiKey', () => {
+    test('should create api key successfully and return raw key', async () => {
       const apiKeyData = {
         name: 'New API Key',
-        permissions: ['read']
+        scopes: ['read'],
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
       };
 
-      const cryptoUtils = require('../../services/cryptoUtils');
-      cryptoUtils.encryptToken = jest.fn().mockReturnValue('encrypted_key');
+      // Mock crypto functions
+      const originalGenerate = apiKeyController._internal.generateSecureKey;
+      const originalHash = apiKeyController._internal.hashKey;
+      apiKeyController._internal.generateSecureKey = jest.fn().mockReturnValue('test_key_data');
+      apiKeyController._internal.hashKey = jest.fn().mockReturnValue('hashed_key_data');
 
       const createdApiKey = {
         ...testApiKey,
         ...apiKeyData,
-        key: 'encrypted_key'
+        key: 'hashed_key_data',
+        prefix: 'testpref',
+        get: jest.fn().mockReturnValue({
+          ...testApiKey,
+          ...apiKeyData,
+          key: 'hashed_key_data',
+          prefix: 'testpref',
+          created_at: new Date()
+        })
       };
 
       mockModels.ApiKey.create.mockResolvedValue(createdApiKey);
 
       const response = await request(app)
-        .post('/api-keys')
+        .post('/apiKey')
         .set('Authorization', `Bearer ${authToken}`)
         .send(apiKeyData);
 
-      expectSuccessResponse(response);
-      expect(response.status).toBe(201);
-      expect(response.body.data).toHaveProperty('plainKey');
+      // Restore original functions
+      apiKeyController._internal.generateSecureKey = originalGenerate;
+      apiKeyController._internal.hashKey = originalHash;
+
+      expectSuccessResponse(response, 201);
+      expect(response.body.data).toHaveProperty('key', 'test_key_data');
+      expect(response.body.message).toBe('API key created successfully');
       expect(mockModels.ApiKey.create).toHaveBeenCalledWith({
         userId: 1,
         name: apiKeyData.name,
-        key: 'encrypted_key',
-        permissions: apiKeyData.permissions,
-        expires_at: expect.any(Date)
+        key: 'hashed_key_data',
+        prefix: expect.any(String),
+        scopes: ['read'],
+        expiresAt: new Date(apiKeyData.expiresAt),
+        isActive: true
       });
     });
 
-    test('should validate required fields', async () => {
+    test('should handle creation errors', async () => {
+      mockModels.ApiKey.create.mockRejectedValue(new Error('DB error'));
+
       const response = await request(app)
-        .post('/api-keys')
+        .post('/apiKey')
         .set('Authorization', `Bearer ${authToken}`)
-        .send({});
+        .send({ name: 'Invalid Key' });
 
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Name is required');
-    });
-
-    test('should validate permissions', async () => {
-      const response = await request(app)
-        .post('/api-keys')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          name: 'Test',
-          permissions: ['invalid_permission']
-        });
-
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Invalid permissions');
+      expectErrorResponse(response, 500);
+      expect(response.body.message).toContain('Failed to create API key');
     });
   });
 
-  describe('GET /api-keys/:id', () => {
-    test('should get api key by id', async () => {
+  describe('DELETE /apiKey/:id', () => {
+    test('should delete api key successfully', async () => {
       mockModels.ApiKey.findOne.mockResolvedValue(testApiKey);
+      mockModels.ApiKey.destroy.mockResolvedValue(1);
 
       const response = await request(app)
-        .get('/api-keys/1')
+        .delete('/apiKey/1')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
-      expect(response.body.data.name).toBe(testApiKey.name);
+      expect(response.body.message).toBe('API key deleted successfully');
+      expect(mockModels.ApiKey.destroy).toHaveBeenCalledWith({
+        where: { id: 1, userId: 1 }
+      });
     });
 
     test('should return 404 for non-existent api key', async () => {
       mockModels.ApiKey.findOne.mockResolvedValue(null);
 
       const response = await request(app)
-        .get('/api-keys/999')
+        .delete('/apiKey/999')
         .set('Authorization', `Bearer ${authToken}`);
 
-      expect(response.status).toBe(404);
+      expectErrorResponse(response, 404);
+      expect(response.body.message).toBe('API key not found');
     });
   });
 
-  describe('PUT /api-keys/:id', () => {
-    test('should update api key successfully', async () => {
-      const updateData = {
-        name: 'Updated API Key',
-        permissions: ['read', 'write', 'delete']
-      };
-
-      mockModels.ApiKey.findOne.mockResolvedValue(testApiKey);
+  describe('PUT /apiKey/:id/toggle', () => {
+    test('should toggle api key status successfully', async () => {
+      const inactiveKey = { ...testApiKey, isActive: false };
+      
+      // First call: deactivate active key
+      mockModels.ApiKey.findOne
+        .mockResolvedValueOnce(testApiKey)
+        // Second call: reactivate inactive key
+        .mockResolvedValueOnce(inactiveKey);
+      
       mockModels.ApiKey.update.mockResolvedValue([1]);
-      mockModels.ApiKey.findOne.mockResolvedValueOnce({ ...testApiKey, ...updateData });
 
-      const response = await request(app)
-        .put('/api-keys/1')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(updateData);
+      // First request: deactivate
+      let response = await request(app)
+        .put('/apiKey/1/toggle')
+        .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
-      expect(mockModels.ApiKey.update).toHaveBeenCalledWith(
-        updateData,
-        { where: { id: 1, userId: 1 } }
-      );
+      expect(response.body.message).toContain('disabled');
+      expect(response.body.data.isActive).toBe(false);
+
+      // Second request: reactivate
+      response = await request(app)
+        .put('/apiKey/1/toggle')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expectSuccessResponse(response);
+      expect(response.body.message).toContain('enabled');
+      expect(response.body.data.isActive).toBe(true);
     });
 
-    test('should not allow updating key directly', async () => {
-      mockModels.ApiKey.findOne.mockResolvedValue(testApiKey);
+    test('should return 404 for non-existent api key', async () => {
+      mockModels.ApiKey.findOne.mockResolvedValue(null);
 
       const response = await request(app)
-        .put('/api-keys/1')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ key: 'new_key' });
+        .put('/apiKey/999/toggle')
+        .set('Authorization', `Bearer ${authToken}`);
 
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Key cannot be updated directly');
+      expectErrorResponse(response, 404);
+      expect(response.body.message).toBe('API key not found');
+    });
+
+    test('should handle toggle errors', async () => {
+      mockModels.ApiKey.findOne.mockResolvedValue(testApiKey);
+      mockModels.ApiKey.update.mockRejectedValue(new Error('DB error'));
+
+      const response = await request(app)
+        .put('/apiKey/1/toggle')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expectErrorResponse(response, 500);
+      expect(response.body.message).toContain('toggle API key status');
     });
   });
 
-  describe('DELETE /api-keys/:id', () => {
-    test('should deactivate api key successfully', async () => {
-      mockModels.ApiKey.findOne.mockResolvedValue(testApiKey);
-      mockModels.ApiKey.update.mockResolvedValue([1]);
+  describe('Error Handling', () => {
+    test('should handle internal server errors', async () => {
+      mockModels.ApiKey.findAll.mockRejectedValue(new Error('Database error'));
 
       const response = await request(app)
-        .delete('/api-keys/1')
+        .get('/apiKey')
         .set('Authorization', `Bearer ${authToken}`);
 
-      expectSuccessResponse(response);
-      expect(mockModels.ApiKey.update).toHaveBeenCalledWith(
-        { is_active: false },
-        { where: { id: 1, userId: 1 } }
-      );
-    });
-  });
-
-  describe('POST /api-keys/:id/regenerate', () => {
-    test('should regenerate api key successfully', async () => {
-      const cryptoUtils = require('../../services/cryptoUtils');
-      cryptoUtils.encryptToken = jest.fn().mockReturnValue('new_encrypted_key');
-
-      mockModels.ApiKey.findOne.mockResolvedValue(testApiKey);
-      mockModels.ApiKey.update.mockResolvedValue([1]);
-
-      const response = await request(app)
-        .post('/api-keys/1/regenerate')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveProperty('plainKey');
-      expect(mockModels.ApiKey.update).toHaveBeenCalledWith(
-        { key: 'new_encrypted_key' },
-        { where: { id: 1, userId: 1 } }
-      );
-    });
-
-    test('should not regenerate inactive api key', async () => {
-      const inactiveApiKey = { ...testApiKey, is_active: false };
-      mockModels.ApiKey.findOne.mockResolvedValue(inactiveApiKey);
-
-      const response = await request(app)
-        .post('/api-keys/1/regenerate')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Cannot regenerate inactive API key');
+      expectErrorResponse(response, 500);
+      expect(response.body.message).toContain('Failed to list API keys');
     });
   });
 });

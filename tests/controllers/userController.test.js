@@ -3,7 +3,6 @@ const express = require('express');
 const userController = require('../../controllers/userController');
 const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
-// Mock des dépendances
 jest.mock('../../models', () => require('../utils/mockModels'));
 jest.mock('../../services/emailService');
 jest.mock('../../services/cryptoUtils');
@@ -11,7 +10,6 @@ jest.mock('../../services/cryptoUtils');
 const app = express();
 app.use(express.json());
 
-// Configuration des routes de test
 app.get('/users', userController.getAllUsers);
 app.get('/users/:id', userController.getUserById);
 app.put('/users/:id', userController.updateUser);
@@ -26,11 +24,11 @@ describe('UserController', () => {
   let testUser;
 
   beforeEach(() => {
-    mockModels = require('../utils/mockModels')();
+    const { createMockModels } = require('../utils/mockModels');
+    mockModels = createMockModels();
     testUser = createTestUser();
     authToken = createTestToken({ id: 1, email: testUser.email });
 
-    // Mock des méthodes User
     jest.clearAllMocks();
   });
 

@@ -1,9 +1,6 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-/**
- * Crée un token JWT valide pour les tests
- */
 const createTestToken = (userData = {}) => {
   const defaultUser = {
     id: 1,
@@ -16,9 +13,6 @@ const createTestToken = (userData = {}) => {
   return jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1h' });
 };
 
-/**
- * Crée un utilisateur de test
- */
 const createTestUser = async (userData = {}) => {
   const defaultUser = {
     name: 'Test User',
@@ -31,9 +25,6 @@ const createTestUser = async (userData = {}) => {
   return { ...defaultUser, ...userData };
 };
 
-/**
- * Crée une vCard de test
- */
 const createTestVCard = (vcardData = {}) => {
   const defaultVCard = {
     name: 'Test VCard',
@@ -47,16 +38,13 @@ const createTestVCard = (vcardData = {}) => {
   return { ...defaultVCard, ...vcardData };
 };
 
-/**
- * Crée un plan de test
- */
 const createTestPlan = (planData = {}) => {
   const defaultPlan = {
     name: 'Test Plan',
     description: 'Test Plan Description',
-    price: 9.99,
+    price: 12.00,
     currency: 'USD',
-    type: 'premium',
+    type: 'Basic',
     features: JSON.stringify(['feature1', 'feature2']),
     is_active: true
   };
@@ -64,9 +52,6 @@ const createTestPlan = (planData = {}) => {
   return { ...defaultPlan, ...planData };
 };
 
-/**
- * Crée un pixel de test
- */
 const createTestPixel = (pixelData = {}) => {
   const defaultPixel = {
     name: 'Test Pixel',
@@ -78,11 +63,7 @@ const createTestPixel = (pixelData = {}) => {
   return { ...defaultPixel, ...pixelData };
 };
 
-/**
- * Mock des services externes
- */
 const mockExternalServices = () => {
-  // Mock Stripe
   jest.mock('stripe', () => ({
     customers: {
       create: jest.fn().mockResolvedValue({ id: 'cus_test123' }),
@@ -94,13 +75,11 @@ const mockExternalServices = () => {
     }
   }));
 
-  // Mock SendGrid
   jest.mock('@sendgrid/mail', () => ({
     setApiKey: jest.fn(),
     send: jest.fn().mockResolvedValue([{ statusCode: 202 }])
   }));
 
-  // Mock Axios pour les APIs externes
   jest.mock('axios', () => ({
     get: jest.fn().mockResolvedValue({ data: {} }),
     post: jest.fn().mockResolvedValue({ data: {} }),
@@ -109,9 +88,6 @@ const mockExternalServices = () => {
   }));
 };
 
-/**
- * Assertions personnalisées pour les réponses API
- */
 const expectSuccessResponse = (response, expectedData = null) => {
   expect(response.status).toBe(200);
   expect(response.body).toHaveProperty('success', true);

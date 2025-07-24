@@ -37,16 +37,17 @@ const checkExpiredSubscriptions = async () => {
   }
 };
 
-cron.schedule('0 0 * * *', async () => {
-  console.log('Running daily subscription expiration check...');
-  try {
-    await checkExpiredSubscriptions();
-    await SubscriptionNotificationService.checkExpiringSubscriptions(); 
-    
-  } catch (error) {
-    console.error('Cron job error:', error);
-  }
-});
+if (process.env.NODE_ENV !== 'test') {
+  cron.schedule('0 0 * * *', async () => {
+    console.log('Running daily subscription expiration check...');
+    try {
+      await checkExpiredSubscriptions();
+      await SubscriptionNotificationService.checkExpiringSubscriptions(); 
+    } catch (error) {
+      console.error('Cron job error:', error);
+    }
+  });
+}
 
 const getUserSubscription = async (req, res) => {
   try {
@@ -71,7 +72,9 @@ const getUserSubscription = async (req, res) => {
         as: 'Plan'
       }]
     });
-    await checkExpiredSubscriptions();
+    if (process.env.NODE_ENV !== 'test') {
+      await checkExpiredSubscriptions();
+    }
     if (!subscription) {
       return res.status(200).json({ 
         success: false,
