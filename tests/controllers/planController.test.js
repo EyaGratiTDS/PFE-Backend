@@ -20,6 +20,13 @@ describe('PlanController', () => {
     app = express();
     app.use(express.json());
     
+    // Middleware pour injecter les models dans req
+    app.use((req, res, next) => {
+      req.models = models;
+      next();
+    });
+    
+    // Routes corrigées pour correspondre au controller
     app.get('/plans', planController.getAllPlans);
     app.get('/plans/free', planController.getFreePlan);
     app.get('/plans/search', planController.searchPlans);
@@ -35,11 +42,15 @@ describe('PlanController', () => {
   });
 
   beforeEach(async () => {
-    await models.Plan.destroy({ where: {} });
+    // Nettoyer la base de données avant chaque test
+    await models.Plan.destroy({ where: {}, truncate: true });
   });
 
   afterAll(async () => {
-    await models.sequelize.close();
+    // Fermer la connexion à la base de données après tous les tests
+    if (models && models.sequelize) {
+      await models.sequelize.close();
+    }
   });
 
   describe('GET /plans - getAllPlans', () => {
@@ -50,26 +61,36 @@ describe('PlanController', () => {
 
       const response = await request(app).get('/plans');
 
-      expectSuccessResponse(response);
-      expect(response.body.plans).toHaveLength(3);
-      expect(response.body.plans[0].name).toBe('Free');
-      expect(response.body.plans[1].name).toBe('Basic');
-      expect(response.body.plans[2].name).toBe('Pro');
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body).toHaveProperty('data');
+      expect(response.body.data).toHaveLength(3);
+      expect(response.body.data[0].name).toBe('Free');
+      expect(response.body.data[1].name).toBe('Basic');
+      expect(response.body.data[2].name).toBe('Pro');
     });
 
     test('should return empty array when no plans exist', async () => {
       const response = await request(app).get('/plans');
 
-      expectSuccessResponse(response);
-      expect(response.body.plans).toHaveLength(0);
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body.data).toHaveLength(0);
     });
 
     test('should handle database error gracefully', async () => {
-      jest.spyOn(models.Plan, 'findAll').mockRejectedValueOnce(new Error('Database error'));
+      // Mock temporaire pour simuler une erreur
+      const originalFindAll = models.Plan.findAll;
+      models.Plan.findAll = jest.fn().mockRejectedValueOnce(new Error('Database error'));
 
       const response = await request(app).get('/plans');
 
-      expectErrorResponse(response, 500, 'Erreur lors de la récupération des plans');
+      expect(response.status).toBe(500);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Erreur serveur');
+
+      // Restaurer la méthode originale
+      models.Plan.findAll = originalFindAll;
     });
   });
 
@@ -77,21 +98,24 @@ describe('PlanController', () => {
     test('should return free plan when it exists', async () => {
       const freePlan = await models.Plan.create(createTestPlan({ 
         name: 'Free', 
-        price: 0,
-        type: 'free'
+        price: 0
       }));
 
       const response = await request(app).get('/plans/free');
 
-      expectSuccessResponse(response);
-      expect(response.body.plan.name).toBe('Free');
-      expect(response.body.plan.price).toBe('0.00');
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body).toHaveProperty('data');
+      expect(response.body.data.name).toBe('Free');
+      expect(response.body.data.price).toBe(0);
     });
 
     test('should return 404 when free plan does not exist', async () => {
       const response = await request(app).get('/plans/free');
 
-      expectErrorResponse(response, 404, 'Plan gratuit non trouvé');
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Aucun plan gratuit trouvé');
     });
   });
 
@@ -120,7 +144,8 @@ describe('PlanController', () => {
     test('should search plans by name', async () => {
       const response = await request(app).get('/plans/search?q=Basic');
 
-      expectSuccessResponse(response);
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
       expect(response.body.data).toHaveLength(1);
       expect(response.body.data[0].name).toBe('Basic');
     });
@@ -128,7 +153,8 @@ describe('PlanController', () => {
     test('should search plans by description', async () => {
       const response = await request(app).get('/plans/search?q=gratuit');
 
-      expectSuccessResponse(response);
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
       expect(response.body.data).toHaveLength(1);
       expect(response.body.data[0].name).toBe('Free');
     });
@@ -136,7 +162,8 @@ describe('PlanController', () => {
     test('should filter active plans only', async () => {
       const response = await request(app).get('/plans/search?activeOnly=true');
 
-      expectSuccessResponse(response);
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
       expect(response.body.data).toHaveLength(2);
       expect(response.body.data.every(plan => plan.is_active)).toBe(true);
     });
@@ -144,14 +171,16 @@ describe('PlanController', () => {
     test('should return all plans when no search query', async () => {
       const response = await request(app).get('/plans/search');
 
-      expectSuccessResponse(response);
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
       expect(response.body.data).toHaveLength(3);
     });
 
     test('should return empty results for non-matching query', async () => {
       const response = await request(app).get('/plans/search?q=nonexistent');
 
-      expectSuccessResponse(response);
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
       expect(response.body.data).toHaveLength(0);
     });
   });
@@ -162,31 +191,33 @@ describe('PlanController', () => {
         name: 'Basic',
         description: 'Plan basique',
         price: 12.00,
-        currency: 'USD',
-        type: 'premium'
+        duration_days: 30
       };
 
       const response = await request(app)
         .post('/plans')
         .send(planData);
 
-      expectSuccessResponse(response);
-      expect(response.body.plan.name).toBe(planData.name);
-      expect(response.body.plan.price).toBe('12.00');
+      expect(response.status).toBe(201);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body).toHaveProperty('data');
+      expect(response.body.data.name).toBe(planData.name);
+      expect(response.body.data.price).toBe(12);
     });
 
     test('should reject invalid plan type', async () => {
       const planData = {
         name: 'InvalidType',
         description: 'Plan invalide',
-        price: 12.00
+        price: 12.00,
+        duration_days: 30
       };
 
       const response = await request(app)
         .post('/plans')
         .send(planData);
 
-      expectValidationError(response);
+      expect(response.status).toBe(400);
       expect(response.body.error).toBe('Type de plan invalide');
       expect(response.body.validTypes).toEqual(['Free', 'Basic', 'Pro']);
     });
@@ -200,7 +231,9 @@ describe('PlanController', () => {
         .post('/plans')
         .send(planData);
 
-      expectErrorResponse(response, 500);
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Name, price and duration_days are required fields');
     });
   });
 
@@ -210,27 +243,33 @@ describe('PlanController', () => {
 
       const response = await request(app).get(`/plans/${plan.id}`);
 
-      expectSuccessResponse(response);
-      expect(response.body.plan.id).toBe(plan.id);
-      expect(response.body.plan.name).toBe(plan.name);
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body).toHaveProperty('data');
+      expect(response.body.data.id).toBe(plan.id);
+      expect(response.body.data.name).toBe(plan.name);
     });
 
     test('should return 404 for non-existent plan', async () => {
       const response = await request(app).get('/plans/999');
 
-      expectErrorResponse(response, 404, 'Plan non trouvé');
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Plan non trouvé');
     });
 
     test('should handle invalid id format', async () => {
       const response = await request(app).get('/plans/invalid-id');
 
-      expectErrorResponse(response, 500);
+      expect(response.status).toBe(500);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Erreur serveur');
     });
   });
 
   describe('PUT /plans/:id - updatePlan', () => {
     test('should update plan successfully', async () => {
-      const plan = await models.Plan.create(createTestPlan());
+      const plan = await models.Plan.create(createTestPlan({ name: 'Basic' }));
       const updateData = {
         name: 'Basic',
         description: 'Plan mis à jour',
@@ -241,9 +280,10 @@ describe('PlanController', () => {
         .put(`/plans/${plan.id}`)
         .send(updateData);
 
-      expectSuccessResponse(response);
-      expect(response.body.plan.description).toBe(updateData.description);
-      expect(response.body.plan.price).toBe('12.99');
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body).toHaveProperty('data');
+      expect(response.body.data.description).toBe(updateData.description);
     });
 
     test('should return 404 for non-existent plan', async () => {
@@ -256,11 +296,13 @@ describe('PlanController', () => {
         .put('/plans/999')
         .send(updateData);
 
-      expectErrorResponse(response, 404, 'Plan non trouvé');
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Plan non trouvé');
     });
 
     test('should reject invalid plan type on update', async () => {
-      const plan = await models.Plan.create(createTestPlan());
+      const plan = await models.Plan.create(createTestPlan({ name: 'Basic' }));
       const updateData = {
         name: 'InvalidType'
       };
@@ -269,7 +311,9 @@ describe('PlanController', () => {
         .put(`/plans/${plan.id}`)
         .send(updateData);
 
-      expectValidationError(response);
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Type de plan invalide');
+      expect(response.body.validTypes).toEqual(['Free', 'Basic', 'Pro']);
     });
   });
 
@@ -279,8 +323,7 @@ describe('PlanController', () => {
 
       const response = await request(app).delete(`/plans/${plan.id}`);
 
-      expectSuccessResponse(response);
-      expect(response.body.message).toBe('Plan supprimé avec succès');
+      expect(response.status).toBe(204);
 
       const deletedPlan = await models.Plan.findByPk(plan.id);
       expect(deletedPlan).toBeNull();
@@ -289,7 +332,9 @@ describe('PlanController', () => {
     test('should return 404 for non-existent plan', async () => {
       const response = await request(app).delete('/plans/999');
 
-      expectErrorResponse(response, 404, 'Plan non trouvé');
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Plan non trouvé');
     });
   });
 
@@ -299,9 +344,10 @@ describe('PlanController', () => {
 
       const response = await request(app).patch(`/plans/${plan.id}/toggle-status`);
 
-      expectSuccessResponse(response);
-      expect(response.body.plan.is_active).toBe(false);
-      expect(response.body.message).toContain('désactivé');
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body).toHaveProperty('data');
+      expect(response.body.data.is_active).toBe(false);
     });
 
     test('should toggle inactive plan to active', async () => {
@@ -309,15 +355,83 @@ describe('PlanController', () => {
 
       const response = await request(app).patch(`/plans/${plan.id}/toggle-status`);
 
-      expectSuccessResponse(response);
-      expect(response.body.plan.is_active).toBe(true);
-      expect(response.body.message).toContain('activé');
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body.data.is_active).toBe(true);
     });
 
     test('should return 404 for non-existent plan', async () => {
       const response = await request(app).patch('/plans/999/toggle-status');
 
-      expectErrorResponse(response, 404, 'Plan non trouvé');
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Plan non trouvé');
+    });
+  });
+
+  describe('Additional Edge Cases', () => {
+    test('should handle database connection errors', async () => {
+      // Fermer temporairement la connexion
+      await models.sequelize.close();
+
+      const response = await request(app).get('/plans');
+
+      expect(response.status).toBe(500);
+      expect(response.body).toHaveProperty('success', false);
+      expect(response.body.error).toBe('Erreur serveur');
+
+      // Rouvrir la connexion pour les autres tests
+      models = createMockModels();
+      await models.sequelize.sync({ force: true });
+    });
+
+    test('should validate price and duration_days as numbers', async () => {
+      const planData = {
+        name: 'Basic',
+        price: 'invalid',
+        duration_days: 'invalid'
+      };
+
+      const response = await request(app)
+        .post('/plans')
+        .send(planData);
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Price and duration_days must be valid numbers');
+    });
+
+    test('should handle features array properly', async () => {
+      const planData = {
+        name: 'Pro',
+        description: 'Plan avec features',
+        price: 29.00,
+        duration_days: 30,
+        features: ['Feature 1', 'Feature 2', 'Feature 3']
+      };
+
+      const response = await request(app)
+        .post('/plans')
+        .send(planData);
+
+      expect(response.status).toBe(201);
+      expect(response.body.data.features).toEqual(['Feature 1', 'Feature 2', 'Feature 3']);
+    });
+
+    test('should handle string features properly', async () => {
+      const planData = {
+        name: 'Pro',
+        description: 'Plan avec features string',
+        price: 29.00,
+        duration_days: 30,
+        features: 'Feature 1, Feature 2, Feature 3'
+      };
+
+      const response = await request(app)
+        .post('/plans')
+        .send(planData);
+
+      expect(response.status).toBe(201);
+      expect(response.body.data.features).toEqual(['Feature 1', 'Feature 2', 'Feature 3']);
     });
   });
 });

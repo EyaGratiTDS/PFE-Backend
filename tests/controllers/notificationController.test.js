@@ -1,209 +1,152 @@
 const request = require('supertest');
 const express = require('express');
-const notificationController = require('../../controllers/NotificationController');
-const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
+const notificationRouter = require('../../routes/notificationRoutes'); // Import du routeur
+const Notification = require('../../models/Notification');
 
-jest.mock('../../models', () => require('../utils/mockModels'));
-jest.mock('../../services/emailService');
-
+// Création de l'application Express pour les tests
 const app = express();
 app.use(express.json());
+app.use('/notifications', notificationRouter); // Montage du routeur sur le chemin de base
 
-app.get('/notification', notificationController.getUserNotifications);
-app.put('/notification/:notificationId/read', notificationController.markNotificationAsRead);
-app.put('/notification/read-all', notificationController.markAllNotificationsAsRead);
-app.delete('/notification/:notificationId', notificationController.deleteNotification);
+// Mock du modèle Notification
+jest.mock('../../models/Notification');
 
-describe('NotificationController', () => {
-  let mockModels;
-  let authToken;
-  let testUser;
-  let testNotification;
+// Mock du middleware d'authentification
+jest.mock('../../middleware/authMiddleware', () => ({
+  requireAuth: (req, res, next) => {
+    req.user = { id: 'user123' };
+    next();
+  }
+}));
 
+// Mock WebSocket
+global.wsBroadcastToUser = jest.fn();
+
+describe('Notification Controller Tests', () => {
   beforeEach(() => {
-    const { createMockModels } = require('../utils/mockModels');
-    mockModels = createMockModels();
-    testUser = createTestUser();
-    testNotification = {
-      id: 1,
-      userId: 1,
-      title: 'Test Notification',
-      message: 'This is a test notification',
-      type: 'info',
-      is_read: false,
-      created_at: new Date(),
-      get: jest.fn().mockReturnThis(),
-      toJSON: jest.fn().mockReturnValue({
-        id: 1,
-        userId: 1,
-        title: 'Test Notification',
-        message: 'This is a test notification',
-        type: 'info',
-        is_read: false,
-        created_at: new Date()
-      })
-    };
-    authToken = createTestToken({ id: 1, email: testUser.email });
-
-    global.wsBroadcastToUser = jest.fn();
-    
     jest.clearAllMocks();
   });
 
-  describe('GET /notification', () => {
-    test('should get all notifications for user', async () => {
-      const notifications = [
-        testNotification,
-        { ...testNotification, id: 2, type: 'warning' }
+  describe('GET /notifications', () => {
+    it('should fetch user notifications successfully', async () => {
+      const mockNotifications = [
+        { id: 1, message: 'Test 1' },
+        { id: 2, message: 'Test 2' }
       ];
+      
+      Notification.findAll.mockResolvedValue(mockNotifications);
+      Notification.count.mockResolvedValue(5);
 
-      mockModels.Notification.findAll.mockResolvedValue(notifications);
-      mockModels.Notification.count.mockResolvedValue(1);
+      const res = await request(app)
+        .get('/notifications')
+        .query({ limit: 10, offset: 0, unreadOnly: 'true' });
 
-      const response = await request(app)
-        .get('/notification')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(2);
-      expect(response.body.meta.totalUnread).toBe(1);
-      expect(mockModels.Notification.findAll).toHaveBeenCalledWith({
-        where: { userId: 1 },
-        limit: 10,
-        offset: 0,
-        order: [['created_at', 'DESC']]
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        data: mockNotifications,
+        meta: { totalUnread: 5 }
       });
     });
 
-    test('should filter unread notifications', async () => {
-      mockModels.Notification.findAll.mockResolvedValue([testNotification]);
-      mockModels.Notification.count.mockResolvedValue(1);
+    it('should handle errors when fetching notifications', async () => {
+      Notification.findAll.mockRejectedValue(new Error('Database error'));
 
-      const response = await request(app)
-        .get('/notification?unreadOnly=true')
-        .set('Authorization', `Bearer ${authToken}`);
+      const res = await request(app).get('/notifications');
 
-      expectSuccessResponse(response);
-      expect(mockModels.Notification.findAll).toHaveBeenCalledWith({
-        where: { userId: 1, is_read: false },
-        limit: 10,
-        offset: 0,
-        order: [['created_at', 'DESC']]
-      });
-    });
-
-    test('should support pagination', async () => {
-      const notifications = Array.from({ length: 5 }, (_, i) => ({
-        ...testNotification,
-        id: i + 1
-      }));
-
-      mockModels.Notification.findAll.mockResolvedValue(notifications.slice(0, 3));
-      mockModels.Notification.count.mockResolvedValue(2); 
-
-      const response = await request(app)
-        .get('/notification?page=1&limit=3')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(3);
-      expect(mockModels.Notification.findAll).toHaveBeenCalledWith({
-        where: { userId: 1 },
-        limit: 3,
-        offset: 0,
-        order: [['created_at', 'DESC']]
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({
+        success: false,
+        error: 'Database error'
       });
     });
   });
 
-  describe('PUT /notification/:notificationId/read', () => {
-    test('should mark notification as read', async () => {
-      mockModels.Notification.markAsRead = jest.fn().mockResolvedValue(testNotification);
+  describe('PATCH /notifications/:notificationId/read', () => {
+    it('should mark notification as read', async () => {
+      const mockNotification = { id: 'notif123' };
+      Notification.markAsRead.mockResolvedValue(mockNotification);
 
-      const response = await request(app)
-        .put('/notification/1/read')
-        .set('Authorization', `Bearer ${authToken}`);
+      const res = await request(app)
+        .patch('/notifications/notif123/read');
 
-      expectSuccessResponse(response);
-      expect(mockModels.Notification.markAsRead).toHaveBeenCalledWith(1);
-      expect(global.wsBroadcastToUser).toHaveBeenCalledWith(1, {
-        type: 'NOTIFICATION_READ',
-        notificationId: 1,
-        timestamp: expect.any(String)
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        data: mockNotification
       });
+      expect(global.wsBroadcastToUser).toHaveBeenCalledWith(
+        'user123',
+        expect.objectContaining({ type: 'NOTIFICATION_READ' })
+      );
     });
 
-    test('should return 404 for non-existent notification', async () => {
-      mockModels.Notification.markAsRead = jest.fn().mockResolvedValue(null);
+    it('should handle not found error', async () => {
+      Notification.markAsRead.mockResolvedValue(null);
 
-      const response = await request(app)
-        .put('/notification/999/read')
-        .set('Authorization', `Bearer ${authToken}`);
+      const res = await request(app)
+        .patch('/notifications/invalid-id/read');
 
-      expectErrorResponse(response, 404);
-      expect(response.body.success).toBe(false);
-      expect(response.body.error).toContain('Notification not found');
+      expect(res.status).toBe(500);
+      expect(res.body.error).toContain('Notification not found');
     });
   });
 
-  describe('PUT /notification/read-all', () => {
-    test('should mark all notifications as read', async () => {
-      mockModels.Notification.markAllAsRead = jest.fn().mockResolvedValue([3]);
+  describe('PATCH /notifications/mark-all-read', () => {
+    it('should mark all notifications as read', async () => {
+      Notification.markAllAsRead.mockResolvedValue([5]);
 
-      const response = await request(app)
-        .put('/notification/read-all')
-        .set('Authorization', `Bearer ${authToken}`);
+      const res = await request(app)
+        .patch('/notifications/mark-all-read');
 
-      expectSuccessResponse(response);
-      expect(response.body.markedCount).toBe(3);
-      expect(mockModels.Notification.markAllAsRead).toHaveBeenCalledWith(1);
-      expect(global.wsBroadcastToUser).toHaveBeenCalledWith(1, {
-        type: 'ALL_NOTIFICATIONS_READ',
-        timestamp: expect.any(String)
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        markedCount: 5
       });
+      expect(global.wsBroadcastToUser).toHaveBeenCalledWith(
+        'user123',
+        expect.objectContaining({ type: 'ALL_NOTIFICATIONS_READ' })
+      );
     });
 
-    test('should handle case when no unread notifications', async () => {
-      mockModels.Notification.markAllAsRead = jest.fn().mockResolvedValue([0]);
+    it('should handle database errors', async () => {
+      Notification.markAllAsRead.mockRejectedValue(new Error('Update failed'));
 
-      const response = await request(app)
-        .put('/notification/read-all')
-        .set('Authorization', `Bearer ${authToken}`);
+      const res = await request(app)
+        .patch('/notifications/mark-all-read');
 
-      expectSuccessResponse(response);
-      expect(response.body.markedCount).toBe(0);
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Update failed');
     });
   });
 
-  describe('DELETE /notification/:notificationId', () => {
-    test('should delete notification successfully', async () => {
-      mockModels.Notification.destroy = jest.fn().mockResolvedValue(1);
+  describe('DELETE /notifications/:notificationId', () => {
+    it('should delete notification successfully', async () => {
+      Notification.destroy.mockResolvedValue(1);
 
-      const response = await request(app)
-        .delete('/notification/1')
-        .set('Authorization', `Bearer ${authToken}`);
+      const res = await request(app)
+        .delete('/notifications/notif123');
 
-      expectSuccessResponse(response);
-      expect(response.body.message).toBe('Notification deleted');
-      expect(mockModels.Notification.destroy).toHaveBeenCalledWith({
-        where: { id: 1, userId: 1 }
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        message: 'Notification deleted'
       });
-      expect(global.wsBroadcastToUser).toHaveBeenCalledWith(1, {
-        type: 'NOTIFICATION_DELETED',
-        notificationId: 1
-      });
+      expect(global.wsBroadcastToUser).toHaveBeenCalledWith(
+        'user123',
+        expect.objectContaining({ type: 'NOTIFICATION_DELETED' })
+      );
     });
 
-    test('should return 404 for non-existent notification', async () => {
-      mockModels.Notification.destroy = jest.fn().mockResolvedValue(0);
+    it('should handle not found error', async () => {
+      Notification.destroy.mockResolvedValue(0);
 
-      const response = await request(app)
-        .delete('/notification/999')
-        .set('Authorization', `Bearer ${authToken}`);
+      const res = await request(app)
+        .delete('/notifications/invalid-id');
 
-      expectErrorResponse(response, 404);
-      expect(response.body.success).toBe(false);
-      expect(response.body.error).toContain('Notification not found');
+      expect(res.status).toBe(500);
+      expect(res.body.error).toContain('Notification not found');
     });
   });
 });

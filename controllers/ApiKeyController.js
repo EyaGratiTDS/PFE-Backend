@@ -201,5 +201,6 @@ module.exports = {
   errorHandler,
   listAllApiKeys,
   toggleApiKeyStatus,
+  hashKey,
   _internal: { generateSecureKey, hashKey, normalizeScopes }
 };

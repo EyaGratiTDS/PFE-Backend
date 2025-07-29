@@ -3,8 +3,8 @@ const express = require('express');
 const customDomainRoutes = require('../../routes/customDomainRoutes');
 const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
 
+// Correction du chemin d'import du middleware
 jest.mock('../../middleware/authMiddleware', () => {
-  const actualAuthMiddleware = jest.requireActual('../middleware/authMiddleware');
   return {
     requireAuth: jest.fn((req, res, next) => {
       req.user = { id: 1, email: 'test@example.com', role: 'user' };
@@ -37,10 +37,6 @@ describe('Custom Domain Routes', () => {
       email: testUser.email,
       role: 'user' 
     });
-
-    const authMiddleware = require('../../middleware/authMiddleware');
-    authMiddleware.requireAuth.mockClear();
-    authMiddleware.requireAuthSuperAdmin.mockClear();
     
     jest.clearAllMocks();
   });
@@ -69,6 +65,7 @@ describe('Custom Domain Routes', () => {
 
   describe('GET /custom-domain/domains', () => {
     test('should get all domains (admin access)', async () => {
+      // Créer un token admin
       const adminToken = createTestToken({ 
         id: 1, 
         email: testUser.email,

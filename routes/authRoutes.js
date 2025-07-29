@@ -24,11 +24,14 @@ router.get('/google/callback',
       const token = encodeURIComponent(req.user.token);
       const user = encodeURIComponent(JSON.stringify(req.user.user));
       
-      let redirectPath = '/dashboard';
-      if (req.user.user && req.user.user.role === 'admin') {
-        redirectPath = '/dashboard';
-      } else if (req.user.user && req.user.user.role === 'user') {
-        redirectPath = '/user-dashboard';
+      // Correction majeure ici : chemins spécifiques pour chaque rôle
+      let redirectPath;
+      if (req.user.user.role === 'superAdmin') {
+        redirectPath = '/super-admin/dashboard';
+      } else if (req.user.user.role === 'admin') {
+        redirectPath = '/admin/dashboard';
+      } else {
+        redirectPath = '/home';
       }
       
       console.log(`Redirecting Google auth user to: ${redirectPath}`);

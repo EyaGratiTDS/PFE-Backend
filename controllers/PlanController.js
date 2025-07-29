@@ -1,7 +1,7 @@
-const  Plan  = require('../models/Plan');
 const { Op } = require('sequelize');
 
 const VALID_PLAN_TYPES = ['Free', 'Basic', 'Pro'];
+
 const validatePlanType = (req, res, next) => {
   if (req.body.name && !VALID_PLAN_TYPES.includes(req.body.name)) {
     return res.status(400).json({ 
@@ -14,6 +14,7 @@ const validatePlanType = (req, res, next) => {
 
 const searchPlans = async (req, res) => {
   try {
+    const { Plan } = req.models || require('../models');
     const { q, activeOnly } = req.query;
     
     const whereClause = {};
@@ -52,9 +53,9 @@ const searchPlans = async (req, res) => {
 
 const createPlan = async (req, res) => {
   try {
-    console.log("icii");
+    const { Plan } = req.models || require('../models');
     const { features = [], ...planData } = req.body;
-    console.log(req.body);
+    
     if (!planData.name || planData.price === undefined || planData.duration_days === undefined) {
       return res.status(400).json({
         success: false,
@@ -127,6 +128,7 @@ const createPlan = async (req, res) => {
 
 const getFreePlan = async (req, res) => {
   try {
+    const { Plan } = req.models || require('../models');
     const freePlans = await Plan.findAll({
       where: {
         price: 0.00,
@@ -157,6 +159,7 @@ const getFreePlan = async (req, res) => {
 
 const getAllPlans = async (req, res) => {
   try {
+    const { Plan } = req.models || require('../models');
     const { active_only, is_default } = req.query;
     
     const where = {};
@@ -184,6 +187,7 @@ const getAllPlans = async (req, res) => {
 
 const getPlanById = async (req, res) => {
   try {
+    const { Plan } = req.models || require('../models');
     const plan = await Plan.findByPk(req.params.id);
     
     if (!plan) {
@@ -208,6 +212,7 @@ const getPlanById = async (req, res) => {
 
 const updatePlan = async (req, res) => {
   try {
+    const { Plan } = req.models || require('../models');
     const plan = await Plan.findByPk(req.params.id);
     if (!plan) {
       return res.status(404).json({
@@ -242,6 +247,7 @@ const updatePlan = async (req, res) => {
 
 const deletePlan = async (req, res) => {
   try {
+    const { Plan } = req.models || require('../models');
     const plan = await Plan.findByPk(req.params.id);
     if (!plan) {
       return res.status(404).json({
@@ -263,6 +269,7 @@ const deletePlan = async (req, res) => {
 
 const togglePlanStatus = async (req, res) => {
   try {
+    const { Plan } = req.models || require('../models');
     const plan = await Plan.findByPk(req.params.id);
     if (!plan) {
       return res.status(404).json({

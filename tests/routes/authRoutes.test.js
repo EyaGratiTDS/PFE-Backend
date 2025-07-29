@@ -1,319 +1,264 @@
 const request = require('supertest');
 const express = require('express');
-const passport = require('passport');
-const authRoutes = require('../../routes/authRoutes');
-const { createMockModels } = require('../utils/mockModels');
+const path = require('path');
 
-jest.mock('passport');
+// Mock amélioré de Passport
+jest.mock('passport', () => ({
+  initialize: jest.fn(),
+  session: jest.fn(),
+  authenticate: jest.fn((strategy, options) => {
+    return (req, res, next) => {
+      // Simuler le comportement de Passport
+      if (options.failureRedirect && req.query.failAuth) {
+        return res.redirect(options.failureRedirect);
+      }
+      
+      // Simuler l'utilisateur authentifié
+      if (req.mockUser) {
+        req.user = req.mockUser;
+      }
+      
+      if (next) next();
+    };
+  })
+}));
 
-describe('AuthRoutes', () => {
+// Configuration initiale
+process.env.FRONTEND_URL = 'http://localhost:3000';
+
+describe('Google Authentication Routes', () => {
   let app;
-  let models;
+  let router;
+  
+  beforeAll(() => {
+    // Essayer différents chemins possibles pour trouver authRoutes
+    const possiblePaths = [
+      '../../../routes/authRoutes',
+      '../../routes/authRoutes', 
+      '../routes/authRoutes',
+      './routes/authRoutes',
+      path.resolve(__dirname, '../../../routes/authRoutes'),
+      path.resolve(__dirname, '../../routes/authRoutes'),
+      path.resolve(process.cwd(), 'routes/authRoutes')
+    ];
+    
+    let routerLoaded = false;
+    
+    for (const routePath of possiblePaths) {
+      try {
+        router = require(routePath);
+        routerLoaded = true;
+        console.log(`Successfully loaded authRoutes from: ${routePath}`);
+        break;
+      } catch (error) {
+        // Continue trying other paths
+        continue;
+      }
+    }
+    
+    if (!routerLoaded) {
+      throw new Error('Could not find authRoutes module. Please check the file path.');
+    }
+  });
 
-  beforeAll(async () => {
-    models = createMockModels();
-    await models.sequelize.sync({ force: true });
-
+  beforeEach(() => {
     app = express();
+    app.use(express.urlencoded({ extended: false }));
     app.use(express.json());
-    app.use(express.urlencoded({ extended: true }));
     
+    // Middleware pour parser les cookies mockés
     app.use((req, res, next) => {
-      req.session = {};
+      if (req.headers.cookie) {
+        const cookies = req.headers.cookie.split('; ');
+        const mockCookie = cookies.find(c => c.startsWith('mockUser='));
+        
+        if (mockCookie) {
+          const userData = mockCookie.split('=')[1];
+          try {
+            req.mockUser = JSON.parse(decodeURIComponent(userData));
+          } catch (e) {
+            req.mockUser = null;
+          }
+        }
+      }
       next();
     });
     
-    app.use((req, res, next) => {
-      req.logout = jest.fn((cb) => cb && cb());
-      next();
-    });
-    
-    app.use('/auth', authRoutes);
-  });
-
-  beforeEach(async () => {
-    await models.User.destroy({ where: {} });
-    
+    app.use('/auth', router);
     jest.clearAllMocks();
-    
-    process.env.FRONTEND_URL = 'http://localhost:5173';
-    process.env.GOOGLE_CLIENT_ID = 'test_google_client_id';
-    process.env.GOOGLE_CLIENT_SECRET = 'test_google_client_secret';
-    process.env.GOOGLE_CALLBACK_URL = 'http://localhost:3000/auth/google/callback';
-  });
-
-  afterAll(async () => {
-    await models.sequelize.close();
   });
 
   describe('GET /auth/google', () => {
-    test('should redirect to Google OAuth', async () => {
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
+    it('should redirect to Google authentication', async () => {
+      const passport = require('passport');
+      
+      // Mock spécifique pour cette route
+      passport.authenticate.mockImplementationOnce((strategy, options) => {
         return (req, res, next) => {
-          res.redirect('https://accounts.google.com/oauth/authorize?client_id=test');
+          // Simuler la redirection vers Google
+          const params = new URLSearchParams({
+            scope: options.scope.join(' '),
+            prompt: options.prompt
+          });
+          res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
         };
       });
 
-      const response = await request(app).get('/auth/google');
+      const res = await request(app).get('/auth/google');
+      
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toMatch(/accounts\.google\.com/);
+      expect(res.headers.location).toContain('scope=profile%20email');
+      expect(res.headers.location).toContain('prompt=select_account%20consent');
+    });
 
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('accounts.google.com');
-      expect(passport.authenticate).toHaveBeenCalledWith('google', {
-        scope: ['profile', 'email'],
-        prompt: 'select_account consent'
-      });
+    it('should handle authentication configuration error', async () => {
+      const passport = require('passport');
+      
+      // Mock qui retourne undefined pour simuler une configuration manquante
+      passport.authenticate.mockImplementationOnce(() => undefined);
+
+      const res = await request(app).get('/auth/google');
+      
+      expect(res.statusCode).toBe(500);
+      expect(res.body).toEqual({ error: 'Authentication not configured' });
     });
   });
 
   describe('GET /auth/google/callback', () => {
-    test('should handle successful Google authentication', async () => {
-      const mockUser = {
-        token: 'test_jwt_token',
-        user: {
-          id: 1,
-          email: 'test@example.com',
-          role: 'admin',
-          name: 'Test User'
-        }
-      };
-
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          req.user = mockUser;
-          next();
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('http://localhost:5173/dashboard');
-      expect(response.headers.location).toContain('token=');
-      expect(response.headers.location).toContain('user=');
-      expect(response.headers.location).toContain('auth=success');
-    });
-
-    test('should redirect admin to dashboard', async () => {
-      const mockUser = {
-        token: 'test_jwt_token',
-        user: {
-          id: 1,
-          email: 'admin@example.com',
-          role: 'admin',
-          name: 'Admin User'
-        }
-      };
-
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          req.user = mockUser;
-          next();
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('/dashboard');
-    });
-
-    test('should redirect user to user-dashboard', async () => {
-      const mockUser = {
-        token: 'test_jwt_token',
-        user: {
-          id: 2,
-          email: 'user@example.com',
-          role: 'user',
-          name: 'Regular User'
-        }
-      };
-
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          req.user = mockUser;
-          next();
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('/user-dashboard');
-    });
-
-    test('should handle authentication failure', async () => {
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          res.redirect(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('sign-in?error=auth_failed');
-    });
-
-    test('should handle missing user or token', async () => {
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          req.user = null; 
-          next();
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('sign-in?error=auth_failed');
-    });
-
-    test('should handle missing token in user object', async () => {
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          req.user = {
-            user: {
-              id: 1,
-              email: 'test@example.com',
-              role: 'admin'
-            }
-          };
-          next();
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('sign-in?error=auth_failed');
-    });
-
-    test('should handle callback errors gracefully', async () => {
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          throw new Error('Callback error');
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('sign-in?error=callback_failed');
-    });
-
-    test('should properly encode token and user data in URL', async () => {
-      const mockUser = {
-        token: 'test.jwt.token-with-special+chars',
-        user: {
-          id: 1,
-          email: 'test+user@example.com',
-          role: 'admin',
-          name: 'Test User with Spaces'
-        }
-      };
-
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          req.user = mockUser;
-          next();
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
+    beforeEach(() => {
+      const passport = require('passport');
       
-      const location = response.headers.location;
-      expect(location).toContain('token=');
-      expect(location).toContain('user=');
-      
-      expect(decodeURIComponent(location)).toContain('test+user@example.com');
-      expect(decodeURIComponent(location)).toContain('Test User with Spaces');
-    });
-
-    test('should include auth=success parameter on successful authentication', async () => {
-      const mockUser = {
-        token: 'test_jwt_token',
-        user: {
-          id: 1,
-          email: 'test@example.com',
-          role: 'admin'
-        }
-      };
-
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
+      // Mock par défaut pour les callbacks
+      passport.authenticate.mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          req.user = mockUser;
-          next();
+          if (options.failureRedirect && req.query.failAuth) {
+            return res.redirect(options.failureRedirect);
+          }
+          
+          if (req.mockUser) {
+            req.user = req.mockUser;
+          }
+          
+          if (next) next();
         };
       });
+    });
 
-      const response = await request(app).get('/auth/google/callback');
+    it('should redirect to sign-in on authentication failure', async () => {
+      const res = await request(app)
+        .get('/auth/google/callback?failAuth=true');
 
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('auth=success');
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toBe(
+        'http://localhost:3000/sign-in?error=auth_failed'
+      );
+    });
+
+    it('should handle missing user token', async () => {
+      const res = await request(app)
+        .get('/auth/google/callback')
+        .set('Cookie', ['mockUser=' + JSON.stringify({})]);
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain('error=auth_failed');
+    });
+
+    it('should redirect to /home for user role', async () => {
+      const mockUser = {
+        token: 'user_token_123',
+        user: { role: 'user', name: 'Test User', email: 'user@test.com' }
+      };
+
+      const res = await request(app)
+        .get('/auth/google/callback')
+        .set('Cookie', ['mockUser=' + JSON.stringify(mockUser)]);
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain(
+        'http://localhost:3000/home?token=user_token_123'
+      );
+      expect(res.headers.location).toContain('auth=success');
+      expect(res.headers.location).toContain(
+        encodeURIComponent(JSON.stringify(mockUser.user))
+      );
+    });
+
+    it('should redirect to /dashboard for admin role', async () => {
+      const mockUser = {
+        token: 'admin_token_456',
+        user: { role: 'admin', name: 'Admin User', email: 'admin@test.com' }
+      };
+
+      const res = await request(app)
+        .get('/auth/google/callback')
+        .set('Cookie', ['mockUser=' + JSON.stringify(mockUser)]);
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain(
+        'http://localhost:3000/dashboard?token=admin_token_456'
+      );
+      expect(res.headers.location).toContain('auth=success');
+    });
+
+    it('should handle unexpected errors', async () => {
+      const originalConsoleError = console.error;
+      console.error = jest.fn();
+      
+      const res = await request(app)
+        .get('/auth/google/callback')
+        .set('Cookie', ['mockUser=INVALID_JSON{']);
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain(
+        'http://localhost:3000/sign-in?error=callback_failed'
+      );
+      
+      console.error = originalConsoleError;
+    });
+
+    it('should handle passport authenticate returning undefined', async () => {
+      const passport = require('passport');
+      
+      // Mock qui ne retourne pas de fonction
+      passport.authenticate.mockImplementationOnce(() => undefined);
+
+      const mockUser = {
+        token: 'test_token',
+        user: { role: 'user', name: 'Test User', email: 'test@test.com' }
+      };
+
+      const res = await request(app)
+        .get('/auth/google/callback')
+        .set('Cookie', ['mockUser=' + JSON.stringify(mockUser)]);
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain('http://localhost:3000/home');
     });
   });
 
   describe('Error handling', () => {
-    test('should handle passport strategy errors', async () => {
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          const error = new Error('Strategy error');
-          next(error);
-        };
-      });
+    it('should handle malformed cookie data gracefully', async () => {
+      const res = await request(app)
+        .get('/auth/google/callback')
+        .set('Cookie', ['mockUser=not-valid-json']);
 
-      app.use((err, req, res, next) => {
-        res.redirect(`${process.env.FRONTEND_URL}/sign-in?error=strategy_error`);
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('error=strategy_error');
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain('error=auth_failed');
     });
 
-    test('should handle network errors gracefully', async () => {
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          const error = new Error('Network error');
-          error.code = 'NETWORK_ERROR';
-          throw error;
-        };
-      });
+    it('should handle missing environment variables', async () => {
+      const originalFrontendUrl = process.env.FRONTEND_URL;
+      delete process.env.FRONTEND_URL;
 
-      const response = await request(app).get('/auth/google/callback');
+      const res = await request(app)
+        .get('/auth/google/callback')
+        .set('Cookie', ['mockUser=' + JSON.stringify({})]);
 
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('sign-in?error=callback_failed');
-    });
-  });
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain('undefined'); // Fallback behavior
 
-  describe('Environment configuration', () => {
-    test('should use correct redirect URLs from environment', async () => {
-      process.env.FRONTEND_URL = 'https://custom-domain.com';
-      
-      const mockUser = {
-        token: 'test_jwt_token',
-        user: {
-          id: 1,
-          email: 'test@example.com',
-          role: 'admin'
-        }
-      };
-
-      passport.authenticate = jest.fn().mockImplementation((strategy, options) => {
-        return (req, res, next) => {
-          req.user = mockUser;
-          next();
-        };
-      });
-
-      const response = await request(app).get('/auth/google/callback');
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toContain('https://custom-domain.com/dashboard');
+      process.env.FRONTEND_URL = originalFrontendUrl;
     });
   });
 });

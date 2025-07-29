@@ -15,7 +15,7 @@ app.post('/block', blockController.createBlock);
 app.put('/block/:id', blockController.updateBlock);
 app.delete('/block/:id', blockController.deleteBlock);
 app.get('/block/admin', blockController.getBlocksByVcardIdAdmin);
-app.putt('/block/:id/toggle-status', blockController.toggleBlock);
+app.put('/block/:id/toggle-status', blockController.toggleBlock);
 
 describe('BlockController', () => {
   let mockModels;
@@ -35,10 +35,21 @@ describe('BlockController', () => {
       type: 'text',
       content: { text: 'Hello World' },
       position: 1,
-      is_active: true
+      is_active: true,
+      status: true, 
+      update: jest.fn().mockResolvedValue({ ...testBlock }), 
+      destroy: jest.fn().mockResolvedValue(true) 
     };
     authToken = createTestToken({ id: 1, email: testUser.email });
 
+    mockModels.VCard.findOne = jest.fn();
+    mockModels.Block.findOne = jest.fn();
+    mockModels.Block.findAll = jest.fn();
+    mockModels.Block.count = jest.fn();
+    mockModels.Block.create = jest.fn();
+    mockModels.Block.update = jest.fn();
+    mockModels.Block.findByPk = jest.fn();
+    
     jest.clearAllMocks();
   });
 
@@ -71,7 +82,7 @@ describe('BlockController', () => {
         .get('/block?vcardId=1')
         .set('Authorization', `Bearer ${authToken}`);
 
-      expectErrorResponse(response);
+      expectErrorResponse(response, 404);
       expect(response.body.message).toContain('VCard not found');
     });
 
@@ -80,14 +91,14 @@ describe('BlockController', () => {
         .get('/block')
         .set('Authorization', `Bearer ${authToken}`);
 
-      expectErrorResponse(response);
+      expectErrorResponse(response, 400);
       expect(response.body.message).toContain('VCard ID is required');
     });
   });
 
   describe('GET /block/:id', () => {
     test('should get block by id', async () => {
-      mockModels.Block.findOne.mockResolvedValue(testBlock);
+      mockModels.Block.findByPk.mockResolvedValue(testBlock);
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
 
       const response = await request(app)
@@ -99,7 +110,7 @@ describe('BlockController', () => {
     });
 
     test('should return 404 for non-existent block', async () => {
-      mockModels.Block.findOne.mockResolvedValue(null);
+      mockModels.Block.findByPk.mockResolvedValue(null);
 
       const response = await request(app)
         .get('/block/999')
@@ -128,8 +139,7 @@ describe('BlockController', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send(blockData);
 
-      expectSuccessResponse(response);
-      expect(response.status).toBe(201);
+      expectSuccessResponse(response, 201);
       expect(mockModels.Block.create).toHaveBeenCalledWith({
         ...blockData,
         position: 1
@@ -187,7 +197,7 @@ describe('BlockController', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({});
 
-      expectErrorResponse(response);
+      expectErrorResponse(response, 400);
     });
 
     test('should validate block type', async () => {
@@ -204,7 +214,7 @@ describe('BlockController', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send(blockData);
 
-      expectErrorResponse(response);
+      expectErrorResponse(response, 400);
       expect(response.body.message).toContain('Invalid block type');
     });
   });
@@ -217,10 +227,9 @@ describe('BlockController', () => {
 
       const updatedBlock = { ...testBlock, ...updateData };
 
-      mockModels.Block.findOne.mockResolvedValue(testBlock);
+      mockModels.Block.findByPk.mockResolvedValue(testBlock);
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.Block.update.mockResolvedValue([1]);
-      mockModels.Block.findOne.mockResolvedValueOnce(updatedBlock);
+      testBlock.update.mockResolvedValue(updatedBlock);
 
       const response = await request(app)
         .put('/block/1')
@@ -228,14 +237,11 @@ describe('BlockController', () => {
         .send(updateData);
 
       expectSuccessResponse(response);
-      expect(mockModels.Block.update).toHaveBeenCalledWith(
-        updateData,
-        { where: { id: 1 } }
-      );
+      expect(testBlock.update).toHaveBeenCalledWith(updateData);
     });
 
     test('should not allow type change', async () => {
-      mockModels.Block.findOne.mockResolvedValue(testBlock);
+      mockModels.Block.findByPk.mockResolvedValue(testBlock);
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
 
       const response = await request(app)
@@ -243,26 +249,22 @@ describe('BlockController', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({ type: 'image' });
 
-      expectErrorResponse(response);
+      expectErrorResponse(response, 400);
       expect(response.body.message).toContain('Block type cannot be changed');
     });
   });
 
   describe('DELETE /block/:id', () => {
     test('should delete block successfully', async () => {
-      mockModels.Block.findOne.mockResolvedValue(testBlock);
+      mockModels.Block.findByPk.mockResolvedValue(testBlock);
       mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.Block.update.mockResolvedValue([1]);
 
       const response = await request(app)
         .delete('/block/1')
         .set('Authorization', `Bearer ${authToken}`);
 
-      expectSuccessResponse(response);
-      expect(mockModels.Block.update).toHaveBeenCalledWith(
-        { is_active: false },
-        { where: { id: 1 } }
-      );
+      expect(response.status).toBe(204);
+      expect(testBlock.destroy).toHaveBeenCalled();
     });
   });
 
@@ -277,14 +279,14 @@ describe('BlockController', () => {
       mockModels.Block.findAll.mockResolvedValue(block);
 
       const response = await request(app)
-        .get('/block?vcardId=1')
+        .get('/block/admin?vcardId=1') // Correction de la route
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
       expect(response.body.data).toHaveLength(2);
       expect(mockModels.Block.findAll).toHaveBeenCalledWith({
-        where: { vcardId: 1, is_active: true },
-        order: [['position', 'ASC']]
+        where: { vcardId: 1, status: true },
+        order: [['createdAt', 'ASC']]
       });
     });
 
@@ -295,7 +297,7 @@ describe('BlockController', () => {
         .get('/block/admin?vcardId=1')
         .set('Authorization', `Bearer ${authToken}`);
 
-      expectErrorResponse(response);
+      expectErrorResponse(response, 404);
       expect(response.body.message).toContain('VCard not found');
     });
 
@@ -304,25 +306,23 @@ describe('BlockController', () => {
         .get('/block/admin')
         .set('Authorization', `Bearer ${authToken}`);
 
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('VCard ID is required');
+      expectErrorResponse(response, 400);
+      expect(response.body.message).toContain('vcardId is required');
     });
   });
 
   describe('PUT /block/:id/toggle-status', () => {
     test('should toggle block status', async () => {
       mockModels.Block.findByPk.mockResolvedValue(testBlock);
-      mockModels.Block.update.mockResolvedValue([1]);
+      testBlock.update.mockResolvedValue({ ...testBlock, status: false });
 
       const response = await request(app)
         .put('/block/1/toggle-status')
         .set('Authorization', `Bearer ${authToken}`);
 
       expectSuccessResponse(response);
-      expect(mockModels.Block.update).toHaveBeenCalledWith(
-        { status: true }, 
-        { where: { id: 1 } }
-      );
+      expect(response.body.newStatus).toBe(false);
+      expect(testBlock.update).toHaveBeenCalledWith({ status: false });
     });
   });
 });
