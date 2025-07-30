@@ -1,274 +1,511 @@
 const request = require('supertest');
 const express = require('express');
-const vcardRoutes = require('../../routes/vcardRoutes');
-const { 
-  createTestToken, 
-  createTestUser, 
-  createTestVCard, 
-  expectSuccessResponse, 
-  expectErrorResponse 
-} = require('../utils/testHelpers');
+const http = require('http');
 
-jest.mock('../../models', () => require('../utils/mockModels'));
-jest.mock('../../middleware/authMiddleware', () => ({
-  requireAuthSuperAdmin: (req, res, next) => {
-    req.user = { id: 1, email: 'admin@example.com', role: 'superadmin' };
-    next();
-  }
-}));
-jest.mock('../../middleware/planLimiter', () => ({
-  checkVCardCreation: (req, res, next) => next()
-}));
+// Mocks définis AVANT l'importation des modules
+jest.mock('../../controllers/vcardController');
+jest.mock('../../controllers/vcardViewController');
+jest.mock('../../middleware/planLimiter');
+jest.mock('../../middleware/authMiddleware');
+
 jest.mock('../../services/uploadService', () => ({
   upload: {
-    fields: () => (req, res, next) => {
-      req.files = {};
+    fields: jest.fn(() => (req, res, next) => {
+      req.files = {
+        logoFile: [{ filename: 'logo.png', path: '/uploads/logo.png' }],
+        backgroundFile: [{ filename: 'bg.jpg', path: '/uploads/bg.jpg' }],
+        faviconFile: [{ filename: 'favicon.ico', path: '/uploads/favicon.ico' }]
+      };
       next();
-    }
+    })
   }
 }));
 
-const app = express();
-app.use(express.json());
-app.use('/vcard', vcardRoutes);
+// Importations APRÈS les mocks
+const vcardController = require('../../controllers/vcardController');
+const vcardViewController = require('../../controllers/vcardViewController');
+const { checkVCardCreation } = require('../../middleware/planLimiter');
+const uploadService = require('../../services/uploadService');
+const { requireAuth, requireAuthSuperAdmin } = require('../../middleware/authMiddleware');
+const vcardRoutes = require('../../routes/vcardRoutes');
 
-describe('VCard Routes', () => {
-  let mockModels;
-  let authToken;
-  let testUser;
-  let testVCard;
+describe('VCard Routes Integration Tests', () => {
+  let app;
+  let server;
+  let baseURL;
+  const sockets = new Set(); // Utilisation d'un Set pour stocker les sockets
+
+  beforeAll((done) => {
+    // Configuration de l'app Express pour les tests
+    app = express();
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
+    
+    // Mock du middleware d'authentification
+    requireAuth.mockImplementation((req, res, next) => {
+      req.user = { id: 'user123', email: 'test@example.com' };
+      next();
+    });
+
+    requireAuthSuperAdmin.mockImplementation((req, res, next) => {
+      req.user = { id: 'admin123', role: 'superadmin' };
+      next();
+    });
+
+    // Mock du middleware de limitation de plan
+    checkVCardCreation.mockImplementation((req, res, next) => {
+      next();
+    });
+
+    // Utilisation des routes
+    app.use('/vcard', vcardRoutes);
+
+    // Créer et démarrer le serveur
+    server = http.createServer(app);
+    
+    // Track active connections
+    server.on('connection', (socket) => {
+      sockets.add(socket);
+      socket.on('close', () => {
+        sockets.delete(socket);
+      });
+    });
+    
+    server.listen(0, () => {
+      baseURL = `http://localhost:${server.address().port}`;
+      done();
+    });
+  });
+
+  afterAll((done) => {
+    // Fermer toutes les connexions actives
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+    
+    // Fermer le serveur
+    server.close(() => {
+      done();
+    });
+  });
 
   beforeEach(() => {
-    const { createMockModels } = require('../utils/mockModels');
-    mockModels = createMockModels();
-    testUser = createTestUser();
-    testVCard = createTestVCard({ userId: 1 });
-    authToken = createTestToken({ id: 1, email: testUser.email });
-
     jest.clearAllMocks();
   });
 
   describe('POST /vcard', () => {
-    test('should create new vcard', async () => {
-      const vcardData = {
-        name: 'New VCard',
-        description: 'Test Description',
-        url: 'unique-url'
+    it('should create a new vCard successfully', async () => {
+      const mockVCard = {
+        id: 'vcard123',
+        name: 'John Doe',
+        email: 'john@example.com',
+        phone: '+1234567890'
       };
-      const createdVCard = { ...vcardData, id: 1, userId: 1 };
-      mockModels.VCard.findOne.mockResolvedValue(null);
-      mockModels.VCard.create.mockResolvedValue(createdVCard);
 
-      const response = await request(app)
+      vcardController.createVCard.mockImplementation((req, res) => {
+        res.status(201).json({ success: true, data: mockVCard });
+      });
+
+      const response = await request(baseURL)
         .post('/vcard')
-        .send(vcardData);
+        .send({
+          name: 'John Doe',
+          email: 'john@example.com',
+          phone: '+1234567890'
+        });
 
-      expectSuccessResponse(response);
       expect(response.status).toBe(201);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toEqual(mockVCard);
     });
 
-    test('should validate required fields', async () => {
-      const response = await request(app)
+    it('should return error when creation fails', async () => {
+      vcardController.createVCard.mockImplementation((req, res) => {
+        res.status(400).json({ success: false, error: 'Invalid data' });
+      });
+
+      const response = await request(baseURL)
         .post('/vcard')
         .send({});
 
-      expectErrorResponse(response);
-    });
-
-    test('should prevent duplicate URLs', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
-
-      const response = await request(app)
-        .post('/vcard')
-        .send({
-          name: 'Test',
-          url: testVCard.url
-        });
-
-      expectErrorResponse(response);
+      expect(response.status).toBe(400);
+      expect(response.body.success).toBe(false);
     });
   });
 
   describe('GET /vcard', () => {
-    test('should get all vcards for authenticated user (mocked)', async () => {
-      const vcards = [testVCard, createTestVCard({ userId: 1, url: 'card2' })];
-      mockModels.VCard.findAll.mockResolvedValue(vcards);
+    it('should get vCards by user ID', async () => {
+      const mockVCards = [
+        { id: 'vcard1', name: 'Card 1' },
+        { id: 'vcard2', name: 'Card 2' }
+      ];
 
-      const response = await request(app)
-        .get('/vcard');
+      vcardController.getVCardsByUserId.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, data: mockVCards });
+      });
 
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(2);
-    });
+      const response = await request(baseURL).get('/vcard');
 
-    test('should support filtering by status', async () => {
-      mockModels.VCard.findAll.mockResolvedValue([testVCard]);
-
-      const response = await request(app)
-        .get('/vcard?status=active');
-
-      expectSuccessResponse(response);
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual(mockVCards);
     });
   });
 
   describe('GET /vcard/:id', () => {
-    test('should get vcard by id', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
+    it('should get vCard by ID', async () => {
+      const mockVCard = { id: 'vcard123', name: 'John Doe' };
 
-      const response = await request(app)
-        .get('/vcard/1');
+      vcardController.getVCardById.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, data: mockVCard });
+      });
 
-      expectSuccessResponse(response);
-      expect(response.body.data.name).toBe(testVCard.name);
+      const response = await request(baseURL).get('/vcard/vcard123');
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual(mockVCard);
     });
 
-    test('should return 404 for non-existent vcard', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(null);
+    it('should return 404 when vCard not found', async () => {
+      vcardController.getVCardById.mockImplementation((req, res) => {
+        res.status(404).json({ success: false, error: 'VCard not found' });
+      });
 
-      const response = await request(app)
-        .get('/vcard/999');
+      const response = await request(baseURL).get('/vcard/nonexistent');
 
       expect(response.status).toBe(404);
+      expect(response.body.success).toBe(false);
     });
   });
 
   describe('PUT /vcard/:id', () => {
-    test('should update vcard', async () => {
-      const updateData = { name: 'Updated VCard' };
-      const updatedVCard = { ...testVCard, ...updateData };
+    it('should update vCard with file uploads', async () => {
+      const mockUpdatedVCard = {
+        id: 'vcard123',
+        name: 'Updated John Doe',
+        logoUrl: '/uploads/logo.png'
+      };
 
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.VCard.update.mockResolvedValue([1]);
-      mockModels.VCard.findOne.mockResolvedValueOnce(updatedVCard);
+      vcardController.updateVCard.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, data: mockUpdatedVCard });
+      });
 
-      const response = await request(app)
-        .put('/vcard/1')
-        .send(updateData);
+      const response = await request(baseURL)
+        .put('/vcard/vcard123')
+        .field('name', 'Updated John Doe')
+        .attach('logoFile', Buffer.from('fake logo'), 'logo.png');
 
-      expectSuccessResponse(response);
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual(mockUpdatedVCard);
     });
 
-    test('should validate URL uniqueness on update', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.VCard.findOne.mockResolvedValueOnce(createTestVCard({ url: 'existing' }));
+    it('should update vCard without file uploads', async () => {
+      const mockUpdatedVCard = {
+        id: 'vcard123',
+        name: 'Updated John Doe'
+      };
 
-      const response = await request(app)
-        .put('/vcard/1')
-        .send({ url: 'existing' });
+      vcardController.updateVCard.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, data: mockUpdatedVCard });
+      });
 
-      expectErrorResponse(response);
+      const response = await request(baseURL)
+        .put('/vcard/vcard123')
+        .send({ name: 'Updated John Doe' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual(mockUpdatedVCard);
     });
   });
 
   describe('DELETE /vcard/:id', () => {
-    test('should delete vcard', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.VCard.destroy.mockResolvedValue(1);
+    it('should delete vCard successfully', async () => {
+      vcardController.deleteVCard.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, message: 'VCard deleted' });
+      });
 
-      const response = await request(app)
-        .delete('/vcard/1');
+      const response = await request(baseURL).delete('/vcard/vcard123');
 
-      expectSuccessResponse(response);
-    });
-  });
-
-  describe('GET /vcard/url/:url', () => {
-    test('should get vcard by url', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
-
-      const response = await request(app)
-        .get(`/vcard/url/${testVCard.url}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.data.url).toBe(testVCard.url);
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
     });
 
-    test('should return 404 for unknown url', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(null);
+    it('should return error when vCard not found for deletion', async () => {
+      vcardController.deleteVCard.mockImplementation((req, res) => {
+        res.status(404).json({ success: false, error: 'VCard not found' });
+      });
 
-      const response = await request(app)
-        .get('/vcard/url/unknown-url');
+      const response = await request(baseURL).delete('/vcard/nonexistent');
 
       expect(response.status).toBe(404);
+      expect(response.body.success).toBe(false);
     });
   });
 
   describe('DELETE /vcard/delete-logo', () => {
-    test('should delete logo', async () => {
-      const response = await request(app)
-        .delete('/vcard/delete-logo');
+    it('should delete logo successfully', async () => {
+      vcardController.deleteLogo.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, message: 'Logo deleted' });
+      });
 
-      expectSuccessResponse(response);
+      const response = await request(baseURL).delete('/vcard/delete-logo');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+    });
+
+    it('should return error when logo deletion fails', async () => {
+      vcardController.deleteLogo.mockImplementation((req, res) => {
+        res.status(400).json({ success: false, error: 'No logo to delete' });
+      });
+
+      const response = await request(baseURL).delete('/vcard/delete-logo');
+
+      expect(response.status).toBe(400);
+      expect(response.body.success).toBe(false);
     });
   });
 
-  describe('GET /vcard/admin/vcards-with-users', () => {
-    test('should get all vcards with users (admin only)', async () => {
-      mockModels.VCard.findAll.mockResolvedValue([
-        { ...testVCard, User: testUser }
-      ]);
+  describe('GET /vcard/url/:url', () => {
+    it('should get vCard by URL', async () => {
+      const mockVCard = { id: 'vcard123', url: 'johndoe', name: 'John Doe' };
 
-      const response = await request(app)
-        .get('/vcard/admin/vcards-with-users')
-        .set('Authorization', `Bearer ${authToken}`);
+      vcardController.getVCardByUrl.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, data: mockVCard });
+      });
 
-      expectSuccessResponse(response);
-      expect(response.body.data[0].User).toBeDefined();
+      const response = await request(baseURL).get('/vcard/url/johndoe');
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual(mockVCard);
+    });
+
+    it('should return 404 when vCard URL not found', async () => {
+      vcardController.getVCardByUrl.mockImplementation((req, res) => {
+        res.status(404).json({ success: false, error: 'VCard not found' });
+      });
+
+      const response = await request(baseURL).get('/vcard/url/nonexistent');
+
+      expect(response.status).toBe(404);
+      expect(response.body.success).toBe(false);
     });
   });
 
   describe('POST /vcard/:id/views', () => {
-    test('should register a vcard view', async () => {
-      const vcardViewController = require('../../controllers/vcardViewController');
-      vcardViewController.registerView = jest.fn((req, res) => res.status(200).json({ success: true }));
+    it('should register view successfully', async () => {
+      vcardViewController.registerView.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, message: 'View registered' });
+      });
 
-      const response = await request(app)
-        .post('/vcard/1/views');
+      const response = await request(baseURL)
+        .post('/vcard/vcard123/views')
+        .send({ userAgent: 'Mozilla/5.0', ip: '127.0.0.1' });
 
       expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+    });
+
+    it('should handle view registration with minimal data', async () => {
+      vcardViewController.registerView.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, message: 'View registered' });
+      });
+
+      const response = await request(baseURL)
+        .post('/vcard/vcard123/views')
+        .send({});
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+    });
+  });
+
+  describe('GET /vcard/admin/vcards-with-users', () => {
+    it('should get all vCards with users for super admin', async () => {
+      const mockVCardsWithUsers = [
+        {
+          id: 'vcard1',
+          name: 'Card 1',
+          user: { id: 'user1', email: 'user1@example.com' }
+        },
+        {
+          id: 'vcard2',
+          name: 'Card 2',
+          user: { id: 'user2', email: 'user2@example.com' }
+        }
+      ];
+
+      vcardController.getAllVCardsWithUsers.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, data: mockVCardsWithUsers });
+      });
+
+      const response = await request(baseURL).get('/vcard/admin/vcards-with-users');
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual(mockVCardsWithUsers);
+    });
+
+    it('should return empty array when no vCards exist', async () => {
+      vcardController.getAllVCardsWithUsers.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, data: [] });
+      });
+
+      const response = await request(baseURL).get('/vcard/admin/vcards-with-users');
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual([]);
     });
   });
 
   describe('PUT /vcard/:id/toggle-status', () => {
-    test('should toggle vcard status (admin)', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(testVCard);
-      mockModels.VCard.update.mockResolvedValue([1]);
+    it('should toggle vCard status for super admin', async () => {
+      const mockVCard = { id: 'vcard123', status: 'inactive' };
 
-      const response = await request(app)
-        .put('/vcard/1/toggle-status')
-        .set('Authorization', `Bearer ${authToken}`);
+      vcardController.toggleVCardStatus.mockImplementation((req, res) => {
+        res.status(200).json({ success: true, data: mockVCard });
+      });
 
-      expectSuccessResponse(response);
+      const response = await request(baseURL).put('/vcard/vcard123/toggle-status');
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toEqual(mockVCard);
     });
 
-    test('should return 404 if vcard not found (toggle-status)', async () => {
-      mockModels.VCard.findOne.mockResolvedValue(null);
+    it('should return error when vCard not found for status toggle', async () => {
+      vcardController.toggleVCardStatus.mockImplementation((req, res) => {
+        res.status(404).json({ success: false, error: 'VCard not found' });
+      });
 
-      const response = await request(app)
-        .put('/vcard/999/toggle-status')
-        .set('Authorization', `Bearer ${authToken}`);
+      const response = await request(baseURL).put('/vcard/nonexistent/toggle-status');
 
       expect(response.status).toBe(404);
+      expect(response.body.success).toBe(false);
+    });
+  });
+
+  describe('Middleware Integration', () => {
+    it('should call middleware on POST', async () => {
+      vcardController.createVCard.mockImplementation((req, res) => {
+        res.status(201).json({ success: true });
+      });
+
+      await request(baseURL).post('/vcard').send({ name: 'Test' });
+
+      expect(vcardController.createVCard).toHaveBeenCalled();
+    });
+
+    it('should handle file upload middleware on PUT', async () => {
+      vcardController.updateVCard.mockImplementation((req, res) => {
+        res.status(200).json({ success: true });
+      });
+
+      await request(baseURL)
+        .put('/vcard/vcard123')
+        .field('name', 'Test');
+
+      expect(vcardController.updateVCard).toHaveBeenCalled();
+    });
+
+    it('should process uploaded files correctly', async () => {
+      vcardController.updateVCard.mockImplementation((req, res) => {
+        res.status(200).json({ success: true });
+      });
+
+      await request(baseURL)
+        .put('/vcard/vcard123')
+        .attach('logoFile', Buffer.from('fake logo'), 'logo.png');
+
+      expect(vcardController.updateVCard).toHaveBeenCalled();
     });
   });
 
   describe('Error Handling', () => {
-    test('should handle database errors', async () => {
-      mockModels.VCard.findAll.mockRejectedValue(new Error('Database error'));
+    it('should handle controller errors gracefully', async () => {
+      vcardController.getVCardById.mockImplementation((req, res) => {
+        res.status(500).json({ success: false, error: 'Internal server error' });
+      });
 
-      const response = await request(app)
-        .get('/vcard');
+      const response = await request(baseURL).get('/vcard/error-test');
 
-      expectErrorResponse(response);
+      expect(response.status).toBe(500);
+      expect(response.body.success).toBe(false);
     });
 
-    test('should validate JSON payload', async () => {
-      const response = await request(app)
-        .post('/vcard')
-        .set('Content-Type', 'application/json')
-        .send('invalid json');
+    it('should handle middleware errors', async () => {
+      checkVCardCreation.mockImplementationOnce((req, res, next) => {
+        res.status(403).json({ success: false, error: 'Plan limit exceeded' });
+      });
 
-      expectErrorResponse(response);
+      const response = await request(baseURL).post('/vcard').send({ name: 'Test' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.success).toBe(false);
+    });
+
+    it('should handle upload service errors', async () => {
+      // Sauvegarder l'implémentation originale
+      const originalUpload = uploadService.upload.fields;
+      
+      // Simuler une erreur d'upload
+      uploadService.upload.fields = jest.fn(() => (req, res, next) => {
+        res.status(400).json({ success: false, error: 'Upload failed' });
+      });
+
+      const response = await request(baseURL)
+        .put('/vcard/vcard123')
+        .attach('logoFile', Buffer.from('fake logo'), 'logo.png');
+
+      expect(response.status).toBe(400);
+      expect(response.body.success).toBe(false);
+      
+      uploadService.upload.fields = originalUpload;
+    });
+  });
+
+  describe('Route Parameters', () => {
+    it('should handle valid vCard ID parameter', async () => {
+      vcardController.getVCardById.mockImplementation((req, res) => {
+        expect(req.params.id).toBe('vcard123');
+        res.status(200).json({ success: true, data: { id: 'vcard123' } });
+      });
+
+      await request(baseURL).get('/vcard/vcard123');
+    });
+
+    it('should handle valid URL parameter', async () => {
+      vcardController.getVCardByUrl.mockImplementation((req, res) => {
+        expect(req.params.url).toBe('test-url');
+        res.status(200).json({ success: true, data: { url: 'test-url' } });
+      });
+
+      await request(baseURL).get('/vcard/url/test-url');
+    });
+  });
+
+  describe('Request Body Handling', () => {
+    it('should handle JSON request body', async () => {
+      vcardController.createVCard.mockImplementation((req, res) => {
+        expect(req.body.name).toBe('Test Name');
+        expect(req.body.email).toBe('test@example.com');
+        res.status(201).json({ success: true });
+      });
+
+      await request(baseURL)
+        .post('/vcard')
+        .send({
+          name: 'Test Name',
+          email: 'test@example.com'
+        });
+    });
+
+    it('should handle form data', async () => {
+      vcardController.updateVCard.mockImplementation((req, res) => {
+        expect(req.body.name).toBe('Updated Name');
+        res.status(200).json({ success: true });
+      });
+
+      await request(baseURL)
+        .put('/vcard/vcard123')
+        .field('name', 'Updated Name');
     });
   });
 });

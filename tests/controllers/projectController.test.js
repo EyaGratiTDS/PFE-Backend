@@ -1,392 +1,267 @@
-const request = require('supertest');
-const express = require('express');
-const projectController = require('../../controllers/ProjectController');
-const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
+const projectController = require('../../controllers/projectController');
+const Project = require('../../models/Project');
+const User = require('../../models/User');
+const VCard = require('../../models/Vcard');
+const fs = require('fs');
 
-jest.mock('../../models', () => require('../utils/mockModels'));
-jest.mock('../../services/uploadService');
+jest.mock('../../models/Project');
+jest.mock('../../models/User'); 
+jest.mock('../../models/Vcard');
+jest.mock('../../models/Subscription');
+jest.mock('../../models/Plan');
+jest.mock('fs');
+jest.mock('path');
 
-const app = express();
-app.use(express.json());
-
-app.post('/projects', projectController.createProject);
-app.get('/projects/:id', projectController.getProjectById);
-app.put('/projects/:id', projectController.updateProject);
-app.delete('/projects/:id', projectController.deleteProject);
-app.get('/projects/user', projectController.getProjectsByUserId);
-app.get('/projects/:id/vcards', projectController.getVCardsByProject);
-app.get('/admin/projects', projectController.getAllProjectsWithUser);
-app.put('/projects/:id/toggle-status', projectController.toggleProjectBlocked);
-
-describe('ProjectController', () => {
-  let mockModels;
-  let authToken;
-  let testUser;
-  let testProject;
+describe('Project Controller', () => {
+  let mockRequest;
+  let mockResponse;
 
   beforeEach(() => {
-    const { createMockModels } = require('../utils/mockModels');
-    mockModels = createMockModels();
-    testUser = createTestUser();
-    testProject = {
-      id: 1,
-      userId: 1,
-      name: 'Test Project',
-      description: 'Test project description',
-      status: 'active',
-      settings: { theme: 'default', layout: 'grid' },
-      created_at: new Date(),
-      updated_at: new Date()
+    mockRequest = {
+      body: {},
+      params: {},
+      query: {},
+      protocol: 'http',
+      get: jest.fn(() => 'localhost:3000'),
+      file: null
     };
-    authToken = createTestToken({ id: 1, email: testUser.email });
+
+    mockResponse = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn(),
+      end: jest.fn()
+    };
 
     jest.clearAllMocks();
   });
 
-  describe('GET /projects', () => {
-    test('should get user projects successfully', async () => {
-      const projects = [
-        testProject,
-        { ...testProject, id: 2, name: 'Another Project' }
-      ];
+  describe('createProject', () => {
+    const validProjectData = {
+      name: 'Test Project',
+      description: 'Test Description',
+      color: '#000000',
+      userId: 1
+    };
 
-      mockModels.Project.findAll.mockResolvedValue(projects);
-
-      const response = await request(app)
-        .get('/projects')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(2);
-      expect(mockModels.Project.findAll).toHaveBeenCalledWith({
-        where: { userId: 1 },
-        include: [{ model: mockModels.VCard, as: 'VCards' }],
-        order: [['updated_at', 'DESC']]
-      });
-    });
-
-    test('should filter projects by status', async () => {
-      mockModels.Project.findAll.mockResolvedValue([testProject]);
-
-      const response = await request(app)
-        .get('/projects?status=active')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-      expect(mockModels.Project.findAll).toHaveBeenCalledWith({
-        where: { userId: 1, status: 'active' },
-        include: [{ model: mockModels.VCard, as: 'VCards' }],
-        order: [['updated_at', 'DESC']]
-      });
-    });
-
-    test('should support search functionality', async () => {
-      mockModels.Project.findAll.mockResolvedValue([testProject]);
-
-      const response = await request(app)
-        .get('/projects?search=Test')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-    });
-  });
-
-  describe('POST /projects', () => {
     test('should create project successfully', async () => {
-      const projectData = {
-        name: 'New Project',
-        description: 'New project description',
-        settings: { theme: 'dark' }
-      };
+      mockRequest.body = validProjectData;
+      mockRequest.file = { filename: 'test-logo.jpg' };
+      
+      const mockUser = { id: 1, name: 'Test User' };
+      User.findByPk.mockResolvedValue(mockUser);
 
-      const createdProject = { ...testProject, ...projectData };
-      mockModels.Project.create.mockResolvedValue(createdProject);
+      const mockCreatedProject = { id: 1, ...validProjectData, logo: '/uploads/test-logo.jpg' };
+      Project.create.mockResolvedValue(mockCreatedProject);
 
-      const response = await request(app)
-        .post('/projects')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(projectData);
+      await projectController.createProject(mockRequest, mockResponse);
 
-      expectSuccessResponse(response);
-      expect(response.status).toBe(201);
-      expect(mockModels.Project.create).toHaveBeenCalledWith({
-        userId: 1,
-        ...projectData,
-        status: 'active'
+      expect(mockResponse.status).toHaveBeenCalledWith(201);
+      expect(mockResponse.json).toHaveBeenCalledWith(mockCreatedProject);
+    });
+
+    test('should return 400 if required fields are missing', async () => {
+      mockRequest.body = { description: 'Test' };
+
+      await projectController.createProject(mockRequest, mockResponse);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        message: expect.stringContaining('mandatory')
       });
     });
 
-    test('should validate required fields', async () => {
-      const response = await request(app)
-        .post('/projects')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({});
+    test('should return 404 if user not found', async () => {
+      mockRequest.body = validProjectData;
+      User.findByPk.mockResolvedValue(null);
 
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Name is required');
-    });
+      await projectController.createProject(mockRequest, mockResponse);
 
-    test('should validate project name length', async () => {
-      const response = await request(app)
-        .post('/projects')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ name: 'a'.repeat(256) });
-
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Name is too long');
-    });
-
-    test('should set default settings if not provided', async () => {
-      const projectData = { name: 'Simple Project' };
-      mockModels.Project.create.mockResolvedValue({
-        ...testProject,
-        ...projectData,
-        settings: { theme: 'default', layout: 'list' }
-      });
-
-      const response = await request(app)
-        .post('/projects')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(projectData);
-
-      expectSuccessResponse(response);
-    });
-  });
-
-  describe('GET /projects/:id', () => {
-    test('should get project by id successfully', async () => {
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-
-      const response = await request(app)
-        .get('/projects/1')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.data.name).toBe(testProject.name);
-    });
-
-    test('should return 404 for non-existent project', async () => {
-      mockModels.Project.findOne.mockResolvedValue(null);
-
-      const response = await request(app)
-        .get('/projects/999')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expect(response.status).toBe(404);
-    });
-
-    test('should not allow access to other users projects', async () => {
-      mockModels.Project.findOne.mockResolvedValue(null);
-
-      const response = await request(app)
-        .get('/projects/1')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expect(mockModels.Project.findOne).toHaveBeenCalledWith({
-        where: { id: 1, userId: 1 },
-        include: [{ model: mockModels.VCard, as: 'VCards' }]
+      expect(mockResponse.status).toHaveBeenCalledWith(404);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        message: 'User not found'
       });
     });
   });
 
-  describe('PUT /projects/:id', () => {
+  describe('getProjectById', () => {
+    test('should return project if found', async () => {
+      const mockProject = { id: 1, name: 'Test Project' };
+      mockRequest.params.id = 1;
+      Project.findByPk.mockResolvedValue(mockProject);
+
+      await projectController.getProjectById(mockRequest, mockResponse);
+
+      expect(mockResponse.json).toHaveBeenCalledWith(mockProject);
+    });
+
+    test('should return 404 if project not found', async () => {
+      mockRequest.params.id = 999;
+      Project.findByPk.mockResolvedValue(null);
+
+      await projectController.getProjectById(mockRequest, mockResponse);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(404);
+    });
+  });
+
+  describe('updateProject', () => {
+    const updateData = {
+      name: 'Updated Project',
+      description: 'Updated Description',
+      userId: 1
+    };
+
     test('should update project successfully', async () => {
-      const updateData = {
-        name: 'Updated Project',
-        description: 'Updated description'
+      mockRequest.params.id = 1;
+      mockRequest.body = updateData;
+      
+      const mockProject = { 
+        id: 1, 
+        name: 'Old Name',
+        logo: '/uploads/old-logo.jpg'
       };
+      Project.findByPk.mockResolvedValue(mockProject);
+      User.findByPk.mockResolvedValue({ id: 1 });
+      Project.update.mockResolvedValue([1]);
 
-      const updatedProject = { ...testProject, ...updateData };
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.Project.update.mockResolvedValue([1]);
-      mockModels.Project.findOne.mockResolvedValueOnce(updatedProject);
+      await projectController.updateProject(mockRequest, mockResponse);
 
-      const response = await request(app)
-        .put('/projects/1')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(updateData);
-
-      expectSuccessResponse(response);
-      expect(mockModels.Project.update).toHaveBeenCalledWith(
-        updateData,
-        { where: { id: 1, userId: 1 } }
-      );
+      expect(mockResponse.json).toHaveBeenCalled();
     });
 
-    test('should validate update data', async () => {
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-
-      const response = await request(app)
-        .put('/projects/1')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ name: '' });
-
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Name cannot be empty');
-    });
-
-    test('should merge settings correctly', async () => {
-      const updateData = {
-        settings: { theme: 'dark' }
+    test('should handle logo removal', async () => {
+      mockRequest.params.id = 1;
+      mockRequest.body = { 
+        ...updateData,
+        removeLogo: 'true'
       };
 
-      const updatedProject = {
-        ...testProject,
-        settings: { ...testProject.settings, theme: 'dark' }
+      const mockProject = {
+        id: 1,
+        logo: '/uploads/old-logo.jpg'
       };
+      Project.findByPk.mockResolvedValue(mockProject);
+      User.findByPk.mockResolvedValue({ id: 1 });
+      Project.update.mockResolvedValue([1]);
 
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.Project.update.mockResolvedValue([1]);
-      mockModels.Project.findOne.mockResolvedValueOnce(updatedProject);
+      await projectController.updateProject(mockRequest, mockResponse);
 
-      const response = await request(app)
-        .put('/projects/1')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(updateData);
-
-      expectSuccessResponse(response);
+      expect(fs.unlink).toHaveBeenCalled();
     });
   });
 
-  describe('DELETE /projects/:id', () => {
+  describe('deleteProject', () => {
     test('should delete project successfully', async () => {
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.Project.destroy.mockResolvedValue(1);
+      mockRequest.params.id = 1;
+      
+      const mockProject = {
+        id: 1,
+        destroy: jest.fn()
+      };
+      Project.findByPk.mockResolvedValue(mockProject);
 
-      const response = await request(app)
-        .delete('/projects/1')
-        .set('Authorization', `Bearer ${authToken}`);
+      await projectController.deleteProject(mockRequest, mockResponse);
 
-      expectSuccessResponse(response);
-      expect(mockModels.Project.destroy).toHaveBeenCalledWith({
-        where: { id: 1, userId: 1 }
-      });
-    });
-
-    test('should handle cascade deletion of related data', async () => {
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.VCard.update.mockResolvedValue([2]); 
-      mockModels.Project.destroy.mockResolvedValue(1);
-
-      const response = await request(app)
-        .delete('/projects/1?cascade=true')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
+      expect(mockProject.destroy).toHaveBeenCalled();
+      expect(mockResponse.status).toHaveBeenCalledWith(204);
     });
   });
 
-  describe('POST /projects/:id/duplicate', () => {
-    test('should duplicate project successfully', async () => {
-      const duplicatedProject = {
-        ...testProject,
-        id: 2,
-        name: 'Copy of ' + testProject.name
-      };
-
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.Project.create.mockResolvedValue(duplicatedProject);
-
-      const response = await request(app)
-        .post('/projects/1/duplicate')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-      expect(response.status).toBe(201);
-      expect(response.body.data.name).toContain('Copy of');
-    });
-
-    test('should handle custom name for duplicate', async () => {
-      const customName = 'My Custom Copy';
-      const duplicatedProject = {
-        ...testProject,
-        id: 2,
-        name: customName
-      };
-
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.Project.create.mockResolvedValue(duplicatedProject);
-
-      const response = await request(app)
-        .post('/projects/1/duplicate')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ name: customName });
-
-      expectSuccessResponse(response);
-      expect(response.body.data.name).toBe(customName);
-    });
-  });
-
-  describe('GET /projects/:id/vcards', () => {
-    test('should get project vcards', async () => {
-      const vcards = [
-        { id: 1, name: 'VCard 1', projectId: 1 },
-        { id: 2, name: 'VCard 2', projectId: 1 }
+  describe('getProjectsByUserId', () => {
+    test('should return user projects', async () => {
+      mockRequest.query.userId = 1;
+      
+      const mockProjects = [
+        { id: 1, name: 'Project 1' },
+        { id: 2, name: 'Project 2' }
       ];
+      Project.findAll.mockResolvedValue(mockProjects);
 
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.VCard.findAll.mockResolvedValue(vcards);
+      await projectController.getProjectsByUserId(mockRequest, mockResponse);
 
-      const response = await request(app)
-        .get('/projects/1/vcards')
-        .set('Authorization', `Bearer ${authToken}`);
+      expect(mockResponse.json).toHaveBeenCalledWith(mockProjects);
+    });
 
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(2);
+    test('should validate userId parameter', async () => {
+      mockRequest.query = {};
+
+      await projectController.getProjectsByUserId(mockRequest, mockResponse);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
     });
   });
 
-  describe('POST /projects/:id/vcards', () => {
-    test('should add vcard to project', async () => {
-      const vcard = { id: 1, name: 'Test VCard', userId: 1, projectId: null };
+  describe('getVCardsByProject', () => {
+    test('should return project vcards with transformed URLs', async () => {
+      mockRequest.params.id = 1;
       
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.VCard.findOne.mockResolvedValue(vcard);
-      mockModels.VCard.update.mockResolvedValue([1]);
+      const mockProject = { id: 1 };
+      Project.findByPk.mockResolvedValue(mockProject);
 
-      const response = await request(app)
-        .post('/projects/1/vcards')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ vcardId: 1 });
+      const mockVCards = [{
+        id: 1,
+        logo: '/logo.jpg',
+        background_type: 'custom-image',
+        background_value: '/bg.jpg',
+        get: () => ({
+          id: 1,
+          logo: '/logo.jpg',
+          background_type: 'custom-image',
+          background_value: '/bg.jpg'
+        })
+      }];
+      VCard.findAll.mockResolvedValue(mockVCards);
 
-      expectSuccessResponse(response);
-      expect(mockModels.VCard.update).toHaveBeenCalledWith(
-        { projectId: 1 },
-        { where: { id: 1, userId: 1 } }
-      );
-    });
+      await projectController.getVCardsByProject(mockRequest, mockResponse);
 
-    test('should not add vcard already in another project', async () => {
-      const vcard = { id: 1, projectId: 2 };
-      
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.VCard.findOne.mockResolvedValue(vcard);
-
-      const response = await request(app)
-        .post('/projects/1/vcards')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ vcardId: 1 });
-
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('already assigned to another project');
+      expect(mockResponse.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        count: 1
+      }));
     });
   });
 
-  describe('DELETE /projects/:id/vcards/:vcardId', () => {
-    test('should remove vcard from project', async () => {
-      mockModels.Project.findOne.mockResolvedValue(testProject);
-      mockModels.VCard.findOne.mockResolvedValue({ id: 1, projectId: 1, userId: 1 });
-      mockModels.VCard.update.mockResolvedValue([1]);
+  describe('getAllProjectsWithUser', () => {
+    test('should return all projects with user data', async () => {
+      const mockProjects = [
+        { 
+          id: 1,
+          name: 'Project 1',
+          Users: { id: 1, name: 'User 1' }
+        }
+      ];
+      Project.findAll.mockResolvedValue(mockProjects);
 
-      const response = await request(app)
-        .delete('/projects/1/vcards/1')
-        .set('Authorization', `Bearer ${authToken}`);
+      await projectController.getAllProjectsWithUser(mockRequest, mockResponse);
 
-      expectSuccessResponse(response);
-      expect(mockModels.VCard.update).toHaveBeenCalledWith(
-        { projectId: null },
-        { where: { id: 1, userId: 1 } }
-      );
+      expect(mockResponse.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        count: 1,
+        data: mockProjects
+      }));
+    });
+  });
+
+  describe('toggleProjectBlocked', () => {
+    test('should toggle project blocked status', async () => {
+      mockRequest.params.id = 1;
+      
+      const mockProject = {
+        id: 1,
+        is_blocked: false
+      };
+      Project.findByPk
+        .mockResolvedValueOnce(mockProject)
+        .mockResolvedValueOnce({ ...mockProject, is_blocked: true });
+      
+      Project.update.mockResolvedValue([1]);
+
+      await projectController.toggleProjectBlocked(mockRequest, mockResponse);
+
+      expect(mockResponse.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        message: expect.stringContaining('blocked')
+      }));
     });
   });
 });

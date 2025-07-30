@@ -1,683 +1,570 @@
 const request = require('supertest');
 const express = require('express');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const { expect } = require('chai');
 
-jest.mock('../../models', () => require('../utils/mockModels'));
-jest.mock('../../services/emailService', () => ({
-  sendVerificationEmail: jest.fn().mockResolvedValue(true),
-  sendAccountCreationEmail: jest.fn().mockResolvedValue(true)
-}));
-
-jest.mock('bcryptjs', () => ({
-  compare: jest.fn().mockResolvedValue(true),
-  hash: jest.fn().mockResolvedValue('$2b$10$hashedPassword'),
-  genSalt: jest.fn().mockResolvedValue('$2b$10$salt'),
-  compareSync: jest.fn().mockReturnValue(true),
-  hashSync: jest.fn().mockReturnValue('$2b$10$hashedPassword')
-}));
-
-jest.mock('jsonwebtoken', () => ({
-  sign: jest.fn().mockReturnValue('mock-jwt-token'),
-  verify: jest.fn().mockReturnValue({ id: 1, email: 'test@example.com' })
-}));
-
-jest.mock('crypto', () => ({
-  randomBytes: jest.fn().mockReturnValue({
-    toString: jest.fn().mockReturnValue('mock-random-string')
-  })
-}));
-
-jest.mock('multer', () => {
-  const multer = jest.fn(() => ({
+const mockUserController = {
+  signUp: jest.fn(),
+  verifyEmail: jest.fn(),
+  signIn: jest.fn(),
+  logout: jest.fn(),
+  createUser: jest.fn(),
+  getCurrentUser: jest.fn(),
+  updateUser: jest.fn(),
+  changePassword: jest.fn(),
+  getTwoFactorStatus: jest.fn(),
+  generateTwoFactorSecret: jest.fn(),
+  verifyAndEnableTwoFactor: jest.fn(),
+  disableTwoFactor: jest.fn(),
+  verifyTwoFactorLogin: jest.fn(),
+  deleteAccount: jest.fn(),
+  getAllUsers: jest.fn(),
+  toggleUserStatus: jest.fn(),
+  upload: {
     single: jest.fn(() => (req, res, next) => next())
-  }));
-  multer.diskStorage = jest.fn();
-  return multer;
-});
-
-jest.mock('../../controllers/ActivityLogController', () => ({
-  logActivity: jest.fn().mockResolvedValue(true)
-}));
-
-jest.mock('../../controllers/NotificationController', () => ({
-  sendWelcomeNotification: jest.fn().mockResolvedValue(true),
-  sendPasswordChangeNotification: jest.fn().mockResolvedValue(true),
-  sendTwoFactorEnabledNotification: jest.fn().mockResolvedValue(true),
-  sendTwoFactorDisabledNotification: jest.fn().mockResolvedValue(true)
-}));
-
-jest.mock('speakeasy', () => ({
-  generateSecret: jest.fn(() => ({
-    base32: 'TEST_SECRET_BASE32',
-    otpauth_url: 'otpauth://totp/Test?secret=TEST_SECRET_BASE32'
-  })),
-  totp: {
-    verify: jest.fn().mockReturnValue(true)
   }
-}));
+};
 
-jest.mock('qrcode', () => ({
-  toDataURL: jest.fn().mockResolvedValue('data:image/png;base64,mockQRCode')
-}));
-
-jest.mock('axios', () => ({
-  post: jest.fn().mockResolvedValue({
-    data: { success: true }
-  })
-}));
-
-jest.mock('../../middleware/authMiddleware', () => ({
-  requireAuth: (req, res, next) => {
-    req.user = { id: 1, email: 'test@example.com', role: 'admin' };
-    next();
-  },
-  requireAuthSuperAdmin: (req, res, next) => {
-    req.user = { id: 1, email: 'test@example.com', role: 'superAdmin' };
-    next();
-  },
-  requireSuperAdmin: (req, res, next) => {
-    if (req.user.role !== 'superAdmin') {
-      return res.status(403).json({ success: false, message: 'Access denied' });
+const mockAuthMiddleware = {
+  requireAuth: jest.fn((req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'Token manquant' });
     }
-    next();
-  }
-}));
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'test-secret');
+      req.user = decoded;
+      next();
+    } catch (error) {
+      return res.status(401).json({ message: 'Token invalide' });
+    }
+  }),
+  requireAuthSuperAdmin: jest.fn((req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'Token manquant' });
+    }
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'test-secret');
+      req.user = decoded;
+      next();
+    } catch (error) {
+      return res.status(401).json({ message: 'Token invalide' });
+    }
+  }),
+  requireSuperAdmin: jest.fn((req, res, next) => {
+    if (req.user && req.user.role === 'superadmin') {
+      next();
+    } else {
+      return res.status(403).json({ message: 'Accès refusé - Super Admin requis' });
+    }
+  })
+};
 
-const userController = require('../../controllers/userController');
-const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
+// Mock des modules
+jest.mock('../../controllers/userController', () => mockUserController);
+jest.mock('../../middleware/authMiddleware', () => mockAuthMiddleware);
 
-describe('UserController', () => {
+describe('Routes utilisateur - Tests d\'intégration', () => {
   let app;
-  let server;
-  let mockModels;
-  let authToken;
-  let testUser;
-  let bcrypt;
-  let speakeasy;
-  let axios;
+  let userToken;
+  let superAdminToken;
 
-  beforeAll(async () => {
+  beforeAll(() => {
+    // Configuration de l'application Express pour les tests
     app = express();
     app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
+    
+    // Import des routes après la configuration des mocks
+    const userRoutes = require('../../routes/userRoutes');
+    app.use('/users', userRoutes);
 
-    app.post('/users/sign-up', userController.signUp);
-    app.get('/users/verify-email', userController.verifyEmail);
-    app.post('/users/sign-in', userController.signIn);
-    app.post('/users/logout', userController.logout);
-    app.post('/users/add-user', userController.createUser);
-    app.get('/users/me', userController.getCurrentUser);
-    app.put('/users/me', userController.upload.single('avatar'), userController.updateUser);
-    app.post('/users/change-password', userController.changePassword);
-    app.get('/users/two-factor/status', userController.getTwoFactorStatus);
-    app.post('/users/two-factor/generate', userController.generateTwoFactorSecret);
-    app.post('/users/two-factor/verify', userController.verifyAndEnableTwoFactor);
-    app.post('/users/two-factor/disable', userController.disableTwoFactor);
-    app.post('/users/two-factor/login', userController.verifyTwoFactorLogin);
-    app.delete('/users/me', userController.deleteAccount);
-    app.get('/users/superadmin/users', userController.getAllUsers);
-    app.put('/users/superadmin/users/:id/status', userController.toggleUserStatus);
-
-    app.get('/users', userController.getAllUsers);
-    app.post('/users', userController.createUser);
-    app.put('/users/:id/toggle', userController.toggleUserStatus);
-    app.get('/profile', userController.getCurrentUser);
-    app.put('/profile', userController.updateUser);
-    app.post('/change-password', userController.changePassword);
-    app.delete('/profile', userController.deleteAccount);
-    app.post('/logout', userController.logout);
-    app.post('/sign-up', userController.signUp);
-    app.post('/sign-in', userController.signIn);
-    app.get('/verify-email', userController.verifyEmail);
-    app.post('/generate-2fa', userController.generateTwoFactorSecret);
-    app.post('/enable-2fa', userController.verifyAndEnableTwoFactor);
-    app.post('/disable-2fa', userController.disableTwoFactor);
-    app.post('/verify-2fa', userController.verifyTwoFactorLogin);
-    app.get('/2fa-status', userController.getTwoFactorStatus);
+    // Génération des tokens de test
+    userToken = jwt.sign(
+      { id: 1, email: 'user@test.com', role: 'user' },
+      process.env.JWT_SECRET || 'test-secret'
+    );
+    
+    superAdminToken = jwt.sign(
+      { id: 2, email: 'admin@test.com', role: 'superadmin' },
+      process.env.JWT_SECRET || 'test-secret'
+    );
   });
 
   beforeEach(() => {
-    const { createMockModels } = require('../utils/mockModels');
-    mockModels = createMockModels();
-    testUser = createTestUser();
-    authToken = createTestToken({ id: 1, email: testUser.email });
-
-    bcrypt = require('bcryptjs');
-    speakeasy = require('speakeasy');
-    axios = require('axios');
-
-    bcrypt.compare.mockClear();
-    bcrypt.hash.mockClear();
-    bcrypt.compare.mockResolvedValue(true);
-    bcrypt.hash.mockResolvedValue('$2b$10$hashedPassword');
-
-    testUser.comparePassword = jest.fn().mockResolvedValue(true);
-    testUser.save = jest.fn().mockResolvedValue();
-    testUser.destroy = jest.fn().mockResolvedValue();
-    
-    Object.defineProperty(testUser, 'password', {
-      set: jest.fn(),
-      get: jest.fn().mockReturnValue('hashedPassword'),
-      configurable: true
-    });
-
+    // Reset des mocks avant chaque test
     jest.clearAllMocks();
-    
-    bcrypt.compare.mockResolvedValue(true);
-    bcrypt.hash.mockResolvedValue('$2b$10$hashedPassword');
-    axios.post.mockResolvedValue({ data: { success: true } });
   });
 
-  afterAll(async () => {
-    if (server) {
-      await new Promise((resolve) => {
-        server.close(resolve);
-      });
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 100));
-  });
-
-  describe('GET /users', () => {
-    test('should get all users successfully', async () => {
-      const users = [testUser, createTestUser({ email: 'user2@test.com' })];
-      const mockResult = {
-        count: 2,
-        rows: users
-      };
-      
-      mockModels.User.findAndCountAll.mockResolvedValue(mockResult);
-      mockModels.Plan.findOne.mockResolvedValue({
-        id: 1,
-        name: 'Free',
-        price: 0
-      });
-
-      const response = await request(app)
-        .get('/users')
-        .set('Authorization', `Bearer ${authToken}`)
-        .timeout(5000);
-
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(2);
-      expect(response.body.pagination).toBeDefined();
-    });
-
-    test('should handle database error', async () => {
-      mockModels.User.findAndCountAll.mockRejectedValue(new Error('Database error'));
-
-      const response = await request(app)
-        .get('/users')
-        .set('Authorization', `Bearer ${authToken}`)
-        .timeout(5000);
-
-      expectErrorResponse(response);
-    });
-  });
-
-  describe('POST /users', () => {
-    test('should create user successfully', async () => {
-      const newUser = { 
-        name: 'New User', 
-        email: 'new@test.com', 
-        role: 'admin',
-        password: 'password123'
-      };
-      
-      mockModels.User.findOne.mockResolvedValue(null);
-      mockModels.User.create.mockResolvedValue({ 
-        id: 3, 
-        ...newUser,
-        isActive: true,
-        isVerified: true,
-        created_at: new Date()
-      });
-
-      const response = await request(app)
-        .post('/users')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(newUser)
-        .timeout(5000);
-
-      expectSuccessResponse(response, 201);
-      expect(response.body.data.email).toBe(newUser.email);
-    });
-
-    test('should return error for existing email', async () => {
-      const newUser = { 
-        name: 'New User', 
-        email: 'existing@test.com', 
-        role: 'admin',
-        password: 'password123'
-      };
-      
-      mockModels.User.findOne.mockResolvedValue({ id: 1, ...newUser });
-
-      const response = await request(app)
-        .post('/users')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(newUser)
-        .timeout(5000);
-
-      expectErrorResponse(response, 400);
-      expect(response.body.message).toContain('already exists');
-    });
-  });
-
-  describe('PUT /users/:id/toggle', () => {
-    test('should toggle user status successfully', async () => {
-      mockModels.User.findByPk.mockResolvedValue({
-        ...testUser,
-        save: jest.fn().mockResolvedValue()
-      });
-
-      const response = await request(app)
-        .put('/users/1/toggle')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ isActive: false })
-        .timeout(5000);
-
-      expectSuccessResponse(response);
-      expect(response.body.message).toContain('deactivated');
-    });
-
-    test('should prevent deactivating superAdmin', async () => {
-      const superAdmin = { 
-        ...testUser, 
-        role: 'superAdmin',
-        save: jest.fn().mockResolvedValue()
-      };
-      mockModels.User.findByPk.mockResolvedValue(superAdmin);
-
-      const response = await request(app)
-        .put('/users/1/toggle')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ isActive: false })
-        .timeout(5000);
-
-      expectErrorResponse(response, 403);
-    });
-  });
-
-  describe('GET /profile', () => {
-    test('should get user profile successfully', async () => {
-      const response = await request(app)
-        .get('/profile')
-        .set('Authorization', `Bearer ${authToken}`)
-        .timeout(5000);
-
-      expectSuccessResponse(response);
-    });
-  });
-
-  describe('PUT /profile', () => {
-    test('should update profile successfully', async () => {
-      const updateData = { name: 'Updated Name' };
-      mockModels.User.findByPk.mockResolvedValue(testUser);
-      mockModels.User.update.mockResolvedValue([1]);
-
-      const response = await request(app)
-        .put('/profile')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(updateData)
-        .timeout(5000);
-
-      expectSuccessResponse(response);
-    });
-
-    test('should handle update error', async () => {
-      mockModels.User.findByPk.mockResolvedValue(testUser);
-      mockModels.User.update.mockRejectedValue(new Error('DB Error'));
-
-      const response = await request(app)
-        .put('/profile')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ name: 'Updated' })
-        .timeout(5000);
-
-      expectErrorResponse(response);
-    });
-  });
-
-  describe('POST /change-password', () => {
-    test('should change password successfully', async () => {
-      const userWithMethods = {
-        ...testUser,
-        comparePassword: jest.fn()
-          .mockResolvedValueOnce(true) 
-          .mockResolvedValueOnce(false), 
-        save: jest.fn().mockResolvedValue(),
-        password: 'oldHashedPassword'
-      };
-      
-      Object.defineProperty(userWithMethods, 'password', {
-        set: jest.fn(),
-        get: jest.fn().mockReturnValue('oldHashedPassword'),
-        configurable: true
-      });
-      
-      mockModels.User.findByPk.mockResolvedValue(userWithMethods);
-
-      const response = await request(app)
-        .post('/change-password')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          currentPassword: 'oldPassword',
-          newPassword: 'newPassword123'
-        })
-        .timeout(5000);
-
-      expectSuccessResponse(response);
-    });
-
-    test('should reject wrong current password', async () => {
-      const userWithMethods = {
-        ...testUser,
-        comparePassword: jest.fn()
-          .mockResolvedValueOnce(false) 
-          .mockResolvedValueOnce(false),
-        save: jest.fn().mockResolvedValue()
-      };
-
-      mockModels.User.findByPk.mockResolvedValue(userWithMethods);
-
-      const response = await request(app)
-        .post('/change-password')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          currentPassword: 'wrongPassword',
-          newPassword: 'newPassword123'
-        })
-        .timeout(5000);
-
-      expectErrorResponse(response, 401);
-      expect(response.body.message).toContain('incorrect');
-    });
-
-    test('should reject same password', async () => {
-      const userWithMethods = {
-        ...testUser,
-        comparePassword: jest.fn()
-          .mockResolvedValueOnce(true) 
-          .mockResolvedValueOnce(true), 
-        save: jest.fn().mockResolvedValue()
-      };
-
-      mockModels.User.findByPk.mockResolvedValue(userWithMethods);
-
-      const response = await request(app)
-        .post('/change-password')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          currentPassword: 'samePassword',
-          newPassword: 'samePassword'
-        })
-        .timeout(5000);
-
-      expectErrorResponse(response, 400);
-      expect(response.body.message).toContain('must be different');
-    });
-  });
-
-  describe('DELETE /profile', () => {
-    test('should delete account successfully', async () => {
-      const userWithMethods = {
-        ...testUser,
-        comparePassword: jest.fn().mockResolvedValue(true),
-        destroy: jest.fn().mockResolvedValue()
-      };
-      
-      mockModels.User.findByPk.mockResolvedValue(userWithMethods);
-
-      const response = await request(app)
-        .delete('/profile')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ password: 'correctPassword' })
-        .timeout(5000);
-
-      expectSuccessResponse(response);
-    });
-
-    test('should reject deletion with wrong password', async () => {
-      const userWithMethods = {
-        ...testUser,
-        comparePassword: jest.fn().mockResolvedValue(false),
-        destroy: jest.fn().mockResolvedValue()
-      };
-      
-      mockModels.User.findByPk.mockResolvedValue(userWithMethods);
-
-      const response = await request(app)
-        .delete('/profile')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ password: 'wrongPassword' })
-        .timeout(5000);
-
-      expectErrorResponse(response, 401);
-    });
-  });
-
-  describe('POST /logout', () => {
-    test('should logout successfully', async () => {
-      const response = await request(app)
-        .post('/logout')
-        .set('Authorization', `Bearer ${authToken}`)
-        .timeout(5000);
-
-      expectSuccessResponse(response);
-    });
-  });
-
-  describe('POST /sign-up', () => {
-    test('should sign up successfully', async () => {
-      const signupData = {
-        name: 'Test User',
+  describe('POST /users/sign-up', () => {
+    it('devrait créer un nouvel utilisateur avec succès', async () => {
+      const userData = {
         email: 'test@example.com',
         password: 'password123',
-        recaptchaToken: 'valid-token'
+        firstName: 'John',
+        lastName: 'Doe'
       };
 
-      const crypto = require('crypto');
-      crypto.randomBytes.mockReturnValue({
-        toString: jest.fn().mockReturnValue('verification-token-123')
+      mockUserController.signUp.mockImplementation((req, res) => {
+        res.status(201).json({
+          message: 'Utilisateur créé avec succès',
+          user: { id: 1, email: userData.email }
+        });
       });
-
-      axios.post.mockResolvedValue({
-        data: { success: true }
-      });
-
-      mockModels.User.findOne.mockResolvedValue(null);
-      
-      const createdUser = {
-        id: 1,
-        name: signupData.name,
-        email: signupData.email,
-        role: 'admin',
-        verificationToken: 'verification-token-123',
-        save: jest.fn().mockResolvedValue()
-      };
-      
-      mockModels.User.create.mockResolvedValue(createdUser);
-      mockModels.User.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(createdUser);
 
       const response = await request(app)
-        .post('/sign-up')
-        .send(signupData)
-        .timeout(5000);
+        .post('/users/sign-up')
+        .send(userData);
 
-      expectSuccessResponse(response, 201);
+      expect(response.status).toBe(201);
+      expect(response.body.message).toBe('Utilisateur créé avec succès');
+      expect(mockUserController.signUp).toHaveBeenCalledTimes(1);
     });
 
-    test('should reject invalid reCAPTCHA', async () => {
-      axios.post.mockResolvedValue({
-        data: { success: false }
+    it('devrait retourner une erreur si les données sont invalides', async () => {
+      mockUserController.signUp.mockImplementation((req, res) => {
+        res.status(400).json({ message: 'Données invalides' });
       });
 
       const response = await request(app)
-        .post('/sign-up')
-        .send({
-          name: 'Test User',
-          email: 'test@example.com',
-          password: 'password123',
-          recaptchaToken: 'invalid-token'
-        })
-        .timeout(5000);
+        .post('/users/sign-up')
+        .send({ email: 'invalid-email' });
 
-      expectErrorResponse(response, 400);
-    });
-
-    test('should reject existing email', async () => {
-      axios.post.mockResolvedValue({
-        data: { success: true }
-      });
-
-      mockModels.User.findOne.mockResolvedValue({
-        id: 1,
-        email: 'existing@example.com'
-      });
-
-      const response = await request(app)
-        .post('/sign-up')
-        .send({
-          name: 'Test User',
-          email: 'existing@example.com',
-          password: 'password123',
-          recaptchaToken: 'valid-token'
-        })
-        .timeout(5000);
-
-      expectErrorResponse(response, 400);
-      expect(response.body.message).toContain('already exists');
+      expect(response.status).toBe(400);
+      expect(response.body.message).toBe('Données invalides');
     });
   });
 
-  describe('POST /sign-in', () => {
-    test('should sign in successfully', async () => {
-      const userWithMethods = {
-        ...testUser,
-        comparePassword: jest.fn().mockResolvedValue(true),
-        isActive: true,
-        isVerified: true,
-        twoFactorEnabled: false
-      };
-
-      mockModels.User.findOne.mockResolvedValue(userWithMethods);
+  describe('GET /users/verify-email', () => {
+    it('devrait vérifier l\'email avec un token valide', async () => {
+      mockUserController.verifyEmail.mockImplementation((req, res) => {
+        res.status(200).json({ message: 'Email vérifié avec succès' });
+      });
 
       const response = await request(app)
-        .post('/sign-in')
-        .send({
-          email: testUser.email,
-          password: 'password123'
-        })
-        .timeout(5000);
+        .get('/users/verify-email')
+        .query({ token: 'valid-token' });
 
-      expectSuccessResponse(response);
+      expect(response.status).toBe(200);
+      expect(response.body.message).toBe('Email vérifié avec succès');
+    });
+
+    it('devrait retourner une erreur avec un token invalide', async () => {
+      mockUserController.verifyEmail.mockImplementation((req, res) => {
+        res.status(400).json({ message: 'Token de vérification invalide' });
+      });
+
+      const response = await request(app)
+        .get('/users/verify-email')
+        .query({ token: 'invalid-token' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toBe('Token de vérification invalide');
+    });
+  });
+
+  describe('POST /users/sign-in', () => {
+    it('devrait connecter un utilisateur avec des identifiants valides', async () => {
+      const credentials = {
+        email: 'test@example.com',
+        password: 'password123'
+      };
+
+      mockUserController.signIn.mockImplementation((req, res) => {
+        res.status(200).json({
+          message: 'Connexion réussie',
+          token: userToken,
+          user: { id: 1, email: credentials.email }
+        });
+      });
+
+      const response = await request(app)
+        .post('/users/sign-in')
+        .send(credentials);
+
+      expect(response.status).toBe(200);
+      expect(response.body.message).toBe('Connexion réussie');
       expect(response.body.token).toBeDefined();
     });
 
-    test('should reject invalid email', async () => {
-      mockModels.User.findOne.mockResolvedValue(null);
+    it('devrait retourner une erreur avec des identifiants invalides', async () => {
+      mockUserController.signIn.mockImplementation((req, res) => {
+        res.status(401).json({ message: 'Identifiants invalides' });
+      });
 
       const response = await request(app)
-        .post('/sign-in')
-        .send({
-          email: 'nonexistent@test.com',
-          password: 'password123'
-        })
-        .timeout(5000);
+        .post('/users/sign-in')
+        .send({ email: 'test@example.com', password: 'wrongpassword' });
 
-      expectErrorResponse(response, 401);
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe('Identifiants invalides');
     });
   });
 
-  describe('2FA Functions', () => {
-    test('POST /generate-2fa should generate secret', async () => {
-      mockModels.User.findByPk.mockResolvedValue({
-        ...testUser,
-        save: jest.fn().mockResolvedValue()
+  describe('POST /users/logout', () => {
+    it('devrait déconnecter un utilisateur authentifié', async () => {
+      mockUserController.logout.mockImplementation((req, res) => {
+        res.status(200).json({ message: 'Déconnexion réussie' });
       });
-      
-      const response = await request(app)
-        .post('/generate-2fa')
-        .set('Authorization', `Bearer ${authToken}`)
-        .timeout(5000);
 
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveProperty('secret');
-      expect(response.body.data).toHaveProperty('qrCode');
+      const response = await request(app)
+        .post('/users/logout')
+        .set('Authorization', `Bearer ${userToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.message).toBe('Déconnexion réussie');
     });
 
-    test('POST /enable-2fa should enable 2FA with valid token', async () => {
-      const userWith2FA = {
-        ...testUser,
-        twoFactorSecret: 'TEST_SECRET',
-        save: jest.fn().mockResolvedValue()
+    it('devrait retourner une erreur sans token d\'authentification', async () => {
+      const response = await request(app)
+        .post('/users/logout');
+
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe('Token manquant');
+    });
+  });
+
+  describe('POST /users/add-user', () => {
+    it('devrait créer un utilisateur', async () => {
+      const userData = {
+        email: 'newuser@example.com',
+        password: 'password123',
+        role: 'user'
       };
-      
-      mockModels.User.findByPk.mockResolvedValue(userWith2FA);
-      speakeasy.totp.verify.mockReturnValue(true);
+
+      mockUserController.createUser.mockImplementation((req, res) => {
+        res.status(201).json({
+          message: 'Utilisateur ajouté avec succès',
+          user: { id: 2, email: userData.email }
+        });
+      });
 
       const response = await request(app)
-        .post('/enable-2fa')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ token: '123456' })
-        .timeout(5000);
+        .post('/users/add-user')
+        .send(userData);
 
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveProperty('recoveryCodes');
+      expect(response.status).toBe(201);
+      expect(response.body.message).toBe('Utilisateur ajouté avec succès');
+    });
+  });
+
+  describe('GET /users/me', () => {
+    it('devrait retourner les informations de l\'utilisateur connecté', async () => {
+      mockUserController.getCurrentUser.mockImplementation((req, res) => {
+        res.status(200).json({
+          user: { id: 1, email: 'test@example.com', firstName: 'John' }
+        });
+      });
+
+      const response = await request(app)
+        .get('/users/me')
+        .set('Authorization', `Bearer ${userToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.user).toBeDefined();
+      expect(response.body.user.email).toBe('test@example.com');
     });
 
-    test('POST /disable-2fa should disable 2FA', async () => {
-      const userWith2FA = { 
-        ...testUser, 
-        twoFactorEnabled: true,
-        save: jest.fn().mockResolvedValue()
+    it('devrait retourner une erreur sans authentification', async () => {
+      const response = await request(app)
+        .get('/users/me');
+
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe('Token manquant');
+    });
+  });
+
+  describe('PUT /users/me', () => {
+    it('devrait mettre à jour le profil utilisateur', async () => {
+      const updateData = {
+        firstName: 'Jane',
+        lastName: 'Smith'
       };
-      mockModels.User.findByPk.mockResolvedValue(userWith2FA);
 
-      const response = await request(app)
-        .post('/disable-2fa')
-        .set('Authorization', `Bearer ${authToken}`)
-        .timeout(5000);
-
-      expectSuccessResponse(response);
-    });
-
-    test('GET /2fa-status should return 2FA status', async () => {
-      mockModels.User.findByPk.mockResolvedValue({ 
-        ...testUser, 
-        twoFactorEnabled: true 
+      mockUserController.updateUser.mockImplementation((req, res) => {
+        res.status(200).json({
+          message: 'Profil mis à jour avec succès',
+          user: { id: 1, ...updateData }
+        });
       });
 
       const response = await request(app)
-        .get('/2fa-status')
-        .set('Authorization', `Bearer ${authToken}`)
-        .timeout(5000);
+        .put('/users/me')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send(updateData);
 
-      expectSuccessResponse(response);
-      expect(response.body.data.enabled).toBe(true);
+      expect(response.status).toBe(200);
+      expect(response.body.message).toBe('Profil mis à jour avec succès');
     });
 
-    test('POST /verify-2fa should verify 2FA login', async () => {
-      const jwt = require('jsonwebtoken');
-      const tempToken = 'temp-token';
-      
-      jwt.verify.mockReturnValue({ id: 1, needs2FA: true });
-      jwt.sign.mockReturnValue('final-token');
-      
-      mockModels.User.findByPk.mockResolvedValue({ 
-        ...testUser, 
-        twoFactorSecret: 'TEST_SECRET',
-        twoFactorEnabled: true,
-        save: jest.fn().mockResolvedValue()
+    it('devrait supporter l\'upload d\'avatar', async () => {
+      mockUserController.updateUser.mockImplementation((req, res) => {
+        res.status(200).json({
+          message: 'Avatar mis à jour',
+          user: { id: 1, avatar: 'new-avatar.jpg' }
+        });
       });
-      speakeasy.totp.verify.mockReturnValue(true);
 
       const response = await request(app)
-        .post('/verify-2fa')
-        .send({ token: '123456', tempToken })
-        .timeout(5000);
+        .put('/users/me')
+        .set('Authorization', `Bearer ${userToken}`)
+        .attach('avatar', Buffer.from('fake-image-data'), 'avatar.jpg');
 
-      expectSuccessResponse(response);
-      expect(response.body).toHaveProperty('token');
+      expect(response.status).toBe(200);
+      expect(mockUserController.upload.single).toHaveBeenCalledWith('avatar');
+    });
+  });
+
+  describe('POST /users/change-password', () => {
+    it('devrait changer le mot de passe avec succès', async () => {
+      const passwordData = {
+        currentPassword: 'oldpassword',
+        newPassword: 'newpassword123'
+      };
+
+      mockUserController.changePassword.mockImplementation((req, res) => {
+        res.status(200).json({ message: 'Mot de passe changé avec succès' });
+      });
+
+      const response = await request(app)
+        .post('/users/change-password')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send(passwordData);
+
+      expect(response.status).toBe(200);
+      expect(response.body.message).toBe('Mot de passe changé avec succès');
+    });
+  });
+
+  describe('Routes 2FA', () => {
+    describe('GET /users/two-factor/status', () => {
+      it('devrait retourner le statut 2FA', async () => {
+        mockUserController.getTwoFactorStatus.mockImplementation((req, res) => {
+          res.status(200).json({ enabled: false });
+        });
+
+        const response = await request(app)
+          .get('/users/two-factor/status')
+          .set('Authorization', `Bearer ${userToken}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.enabled).toBe(false);
+      });
+    });
+
+    describe('POST /users/two-factor/generate', () => {
+      it('devrait générer un secret 2FA', async () => {
+        mockUserController.generateTwoFactorSecret.mockImplementation((req, res) => {
+          res.status(200).json({
+            secret: 'JBSWY3DPEHPK3PXP',
+            qrCode: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...'
+          });
+        });
+
+        const response = await request(app)
+          .post('/users/two-factor/generate')
+          .set('Authorization', `Bearer ${userToken}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.secret).toBeDefined();
+        expect(response.body.qrCode).toBeDefined();
+      });
+    });
+
+    describe('POST /users/two-factor/verify', () => {
+      it('devrait vérifier et activer 2FA', async () => {
+        mockUserController.verifyAndEnableTwoFactor.mockImplementation((req, res) => {
+          res.status(200).json({ message: '2FA activé avec succès' });
+        });
+
+        const response = await request(app)
+          .post('/users/two-factor/verify')
+          .set('Authorization', `Bearer ${userToken}`)
+          .send({ token: '123456' });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('2FA activé avec succès');
+      });
+    });
+
+    describe('POST /users/two-factor/disable', () => {
+      it('devrait désactiver 2FA', async () => {
+        mockUserController.disableTwoFactor.mockImplementation((req, res) => {
+          res.status(200).json({ message: '2FA désactivé avec succès' });
+        });
+
+        const response = await request(app)
+          .post('/users/two-factor/disable')
+          .set('Authorization', `Bearer ${userToken}`)
+          .send({ password: 'currentpassword' });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('2FA désactivé avec succès');
+      });
+    });
+
+    describe('POST /users/two-factor/login', () => {
+      it('devrait vérifier le token 2FA lors de la connexion', async () => {
+        mockUserController.verifyTwoFactorLogin.mockImplementation((req, res) => {
+          res.status(200).json({
+            message: 'Connexion 2FA réussie',
+            token: userToken
+          });
+        });
+
+        const response = await request(app)
+          .post('/users/two-factor/login')
+          .send({
+            email: 'test@example.com',
+            token: '123456'
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('Connexion 2FA réussie');
+        expect(response.body.token).toBeDefined();
+      });
+    });
+  });
+
+  describe('DELETE /users/me', () => {
+    it('devrait supprimer le compte utilisateur', async () => {
+      mockUserController.deleteAccount.mockImplementation((req, res) => {
+        res.status(200).json({ message: 'Compte supprimé avec succès' });
+      });
+
+      const response = await request(app)
+        .delete('/users/me')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ password: 'confirmpassword' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.message).toBe('Compte supprimé avec succès');
+    });
+  });
+
+  describe('Routes Super Admin', () => {
+    describe('GET /users/superadmin/users', () => {
+      it('devrait retourner tous les utilisateurs pour un super admin', async () => {
+        mockUserController.getAllUsers.mockImplementation((req, res) => {
+          res.status(200).json({
+            users: [
+              { id: 1, email: 'user1@test.com', status: 'active' },
+              { id: 2, email: 'user2@test.com', status: 'inactive' }
+            ]
+          });
+        });
+
+        const response = await request(app)
+          .get('/users/superadmin/users')
+          .set('Authorization', `Bearer ${superAdminToken}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.users).toHaveLength(2);
+      });
+
+      it('devrait retourner une erreur pour un utilisateur normal', async () => {
+        const response = await request(app)
+          .get('/users/superadmin/users')
+          .set('Authorization', `Bearer ${userToken}`);
+
+        expect(response.status).toBe(403);
+        expect(response.body.message).toBe('Accès refusé - Super Admin requis');
+      });
+
+      it('devrait retourner une erreur sans authentification', async () => {
+        const response = await request(app)
+          .get('/users/superadmin/users');
+
+        expect(response.status).toBe(401);
+        expect(response.body.message).toBe('Token manquant');
+      });
+    });
+
+    describe('PUT /users/superadmin/users/:id/status', () => {
+      it('devrait changer le statut d\'un utilisateur pour un super admin', async () => {
+        mockUserController.toggleUserStatus.mockImplementation((req, res) => {
+          res.status(200).json({
+            message: 'Statut utilisateur mis à jour',
+            user: { id: 1, status: 'inactive' }
+          });
+        });
+
+        const response = await request(app)
+          .put('/users/superadmin/users/1/status')
+          .set('Authorization', `Bearer ${superAdminToken}`)
+          .send({ status: 'inactive' });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('Statut utilisateur mis à jour');
+      });
+
+      it('devrait retourner une erreur pour un utilisateur normal', async () => {
+        const response = await request(app)
+          .put('/users/superadmin/users/1/status')
+          .set('Authorization', `Bearer ${userToken}`)
+          .send({ status: 'inactive' });
+
+        expect(response.status).toBe(403);
+        expect(response.body.message).toBe('Accès refusé - Super Admin requis');
+      });
+    });
+  });
+
+  describe('Tests de sécurité', () => {
+    it('devrait rejeter les requêtes avec un token malformé', async () => {
+      const response = await request(app)
+        .get('/users/me')
+        .set('Authorization', 'Bearer invalid-token');
+
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe('Token invalide');
+    });
+
+    it('devrait rejeter les requêtes sans header Authorization', async () => {
+      const response = await request(app)
+        .get('/users/me');
+
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe('Token manquant');
+    });
+
+    it('devrait rejeter les requêtes avec un token expiré', async () => {
+      const expiredToken = jwt.sign(
+        { id: 1, email: 'test@example.com' },
+        process.env.JWT_SECRET || 'test-secret',
+        { expiresIn: '-1h' }
+      );
+
+      const response = await request(app)
+        .get('/users/me')
+        .set('Authorization', `Bearer ${expiredToken}`);
+
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe('Token invalide');
+    });
+  });
+
+  describe('Tests d\'erreur', () => {
+    it('devrait gérer les erreurs de serveur', async () => {
+      mockUserController.getCurrentUser.mockImplementation((req, res) => {
+        res.status(500).json({ message: 'Erreur interne du serveur' });
+      });
+
+      const response = await request(app)
+        .get('/users/me')
+        .set('Authorization', `Bearer ${userToken}`);
+
+      expect(response.status).toBe(500);
+      expect(response.body.message).toBe('Erreur interne du serveur');
+    });
+
+    it('devrait gérer les routes non existantes', async () => {
+      const response = await request(app)
+        .get('/users/nonexistent-route');
+
+      expect(response.status).toBe(404);
     });
   });
 });

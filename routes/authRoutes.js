@@ -24,19 +24,7 @@ router.get('/google/callback',
       const token = encodeURIComponent(req.user.token);
       const user = encodeURIComponent(JSON.stringify(req.user.user));
       
-      // Correction majeure ici : chemins spécifiques pour chaque rôle
-      let redirectPath;
-      if (req.user.user.role === 'superAdmin') {
-        redirectPath = '/super-admin/dashboard';
-      } else if (req.user.user.role === 'admin') {
-        redirectPath = '/admin/dashboard';
-      } else {
-        redirectPath = '/home';
-      }
-      
-      console.log(`Redirecting Google auth user to: ${redirectPath}`);
-      
-      res.redirect(`${process.env.FRONTEND_URL}${redirectPath}?token=${token}&user=${user}&auth=success`);
+      res.redirect(`${process.env.FRONTEND_URL}/auth/handler?token=${token}&user=${user}&auth=success`);
     } catch (error) {
       console.error('Google callback error:', error);
       res.redirect(`${process.env.FRONTEND_URL}/sign-in?error=callback_failed`);

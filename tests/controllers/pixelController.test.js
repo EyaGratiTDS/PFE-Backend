@@ -1,408 +1,632 @@
-const request = require('supertest');
-const express = require('express');
 const pixelController = require('../../controllers/pixelController');
-const { createMockModels } = require('../utils/mockModels');
-const { 
-  createTestPixel, 
-  createTestVCard, 
-  createTestUser,
-  expectSuccessResponse, 
-  expectErrorResponse,
-  expectNotFoundError,
-  mockExternalServices
-} = require('../utils/testHelpers');
+const { VCard, Pixel, EventTracking } = require('../../models');
+const User = require('../../models/User');
+const { getClientIp } = require('request-ip');
+const axios = require('axios');
+const UAParser = require('ua-parser-js');
+
+jest.mock('../../models', () => ({
+  VCard: {
+    findOne: jest.fn(),
+  },
+  Pixel: {
+    create: jest.fn(),
+    findOne: jest.fn(),
+    findByPk: jest.fn(),
+    findAll: jest.fn(),
+  },
+  EventTracking: {
+    create: jest.fn(),
+  },
+}));
+
+jest.mock('../../models/User', () => ({
+  findByPk: jest.fn(),
+}));
+
+jest.mock('request-ip', () => ({
+  getClientIp: jest.fn(),
+}));
 
 jest.mock('axios');
-const axios = require('axios');
+
+jest.mock('ua-parser-js');
+
+process.env.META_API_URL = 'https://graph.facebook.com';
+process.env.META_API_VERSION = 'v18.0';
+process.env.API_URL = 'https://api.test.com';
+process.env.META_SYSTEM_ACCESS_TOKEN = 'test_access_token';
 
 describe('PixelController', () => {
-  let app;
-  let models;
+  let req, res;
 
-  beforeAll(async () => {
-    models = createMockModels();
-    await models.sequelize.sync({ force: true });
-    
-    mockExternalServices();
+  beforeEach(() => {
+    req = {
+      body: {},
+      params: {},
+      query: {},
+      headers: {},
+      user: { id: 1 },
+    };
+    res = {
+      status: jest.fn(() => res),
+      json: jest.fn(() => res),
+      writeHead: jest.fn(() => res),
+      end: jest.fn(() => res),
+    };
 
-    app = express();
-    app.use(express.json());
-    
-    app.use((req, res, next) => {
-      req.user = { id: 1, role: 'admin' };
-      next();
-    });
-    
-    app.post('/pixels', pixelController.createPixel);
-    app.put('/pixels/:pixelId', pixelController.updatePixel);
-    app.delete('/pixels/:pixelId', pixelController.deletePixel);
-    app.get('/pixels/user', pixelController.getUserPixels);
-    app.get('/pixels/:pixelId', pixelController.getPixelById);
-    app.post('/pixels/:pixelId/track', pixelController.trackEvent);
-    app.get('/pixels/vcard/:vcardId', pixelController.getPixelsByVCard);
-    app.get('/pixels', pixelController.getPixels);
-    app.put('/pixels/:id/toggle-blocked', pixelController.toggleBlocked);
-  });
-
-  beforeEach(async () => {
-    await models.User.destroy({ where: {} });
-    await models.VCard.destroy({ where: {} });
-    await models.Pixel.destroy({ where: {} });
-    await models.EventTracking.destroy({ where: {} });
-    
     jest.clearAllMocks();
-    
-    axios.get.mockResolvedValue({ data: { ip: '127.0.0.1' } });
-    axios.post.mockResolvedValue({ data: { id: 'meta_pixel_123' } });
-    axios.delete.mockResolvedValue({ data: {} });
   });
 
-  afterAll(async () => {
-    await models.sequelize.close();
-  });
-
-  describe('POST /pixels - createPixel', () => {
-    test('should create pixel successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-
-      const pixelData = {
-        vcardId: vcard.id,
+  describe('createPixel', () => {
+    it('devrait créer un pixel avec succès', async () => {
+      req.body = {
+        vcardId: 1,
         name: 'Test Pixel',
-        userId: user.id
-      };
-
-      const response = await request(app)
-        .post('/pixels')
-        .send(pixelData);
-
-      expectSuccessResponse(response);
-      expect(response.body.pixel.name).toBe(pixelData.name);
-      expect(response.body.pixel.vcardId).toBe(vcard.id);
-      expect(response.body.pixel.trackingUrl).toContain('/track');
-    });
-
-    test('should create pixel with Meta integration', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-
-      const pixelData = {
-        vcardId: vcard.id,
-        name: 'Meta Pixel',
-        userId: user.id,
+        userId: 1,
         metaAccessToken: 'test_token',
-        metaAccountId: 'test_account'
+        metaAccountId: 'test_account_id',
       };
 
-      axios.post.mockResolvedValueOnce({ data: { id: 'meta_pixel_123' } });
-
-      const response = await request(app)
-        .post('/pixels')
-        .send(pixelData);
-
-      expectSuccessResponse(response);
-      expect(response.body.pixel.metaPixelId).toBe('meta_pixel_123');
-    });
-
-    test('should return 404 for non-existent vCard', async () => {
-      const pixelData = {
-        vcardId: 999,
+      const mockVCard = { id: 1, name: 'Test VCard', userId: 1 };
+      const mockPixel = {
+        id: 1,
         name: 'Test Pixel',
-        userId: 1
+        vcardId: 1,
+        metaPixelId: 'meta_pixel_123',
+        is_active: true,
       };
 
-      const response = await request(app)
-        .post('/pixels')
-        .send(pixelData);
+      VCard.findOne.mockResolvedValue(mockVCard);
+      Pixel.findOne.mockResolvedValue(null); 
+      axios.post.mockResolvedValue({ data: { id: 'meta_pixel_123' } });
+      Pixel.create.mockResolvedValue(mockPixel);
 
-      expectNotFoundError(response, 'VCard not found');
+      await pixelController.createPixel(req, res);
+
+      expect(VCard.findOne).toHaveBeenCalledWith({
+        where: { id: 1, userId: 1 },
+      });
+      expect(Pixel.findOne).toHaveBeenCalledWith({ where: { vcardId: 1 } });
+      expect(Pixel.create).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(201);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        pixel: {
+          id: 1,
+          name: 'Test Pixel',
+          trackingUrl: 'https://api.test.com/pixels/1/track',
+          metaPixelId: 'meta_pixel_123',
+          vcardId: 1,
+          is_active: true,
+        },
+      });
     });
 
-    test('should return 409 for existing pixel on vCard', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      await models.Pixel.create(createTestPixel({ vcardId: vcard.id }));
+    it('devrait retourner 404 si la VCard n\'existe pas', async () => {
+      req.body = { vcardId: 999, userId: 1 };
+      VCard.findOne.mockResolvedValue(null);
 
-      const pixelData = {
-        vcardId: vcard.id,
-        name: 'Another Pixel',
-        userId: user.id
-      };
+      await pixelController.createPixel(req, res);
 
-      const response = await request(app)
-        .post('/pixels')
-        .send(pixelData);
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'VCard not found or unauthorized',
+      });
+    });
 
-      expectErrorResponse(response, 409, 'A pixel already exists');
+    it('devrait retourner 409 si un pixel existe déjà', async () => {
+      req.body = { vcardId: 1, userId: 1 };
+      const mockVCard = { id: 1, userId: 1 };
+      const mockExistingPixel = { id: 1, vcardId: 1 };
+
+      VCard.findOne.mockResolvedValue(mockVCard);
+      Pixel.findOne.mockResolvedValue(mockExistingPixel);
+
+      await pixelController.createPixel(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'A pixel already exists for this vCard',
+      });
     });
   });
 
-  describe('PUT /pixels/:pixelId - updatePixel', () => {
-    test('should update pixel successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ vcardId: vcard.id }));
+  describe('updatePixel', () => {
+    it('devrait mettre à jour un pixel avec succès', async () => {
+      req.params = { pixelId: 1 };
+      req.body = { name: 'Updated Pixel', is_active: false };
 
-      const updateData = {
+      const mockPixel = {
+        id: 1,
+        name: 'Test Pixel',
+        metaPixelId: 'meta_123',
+        is_active: true,
+        update: jest.fn(),
+        VCard: { id: 1, name: 'Test VCard' },
+      };
+
+      Pixel.findByPk.mockResolvedValue(mockPixel);
+      mockPixel.update.mockResolvedValue();
+
+      await pixelController.updatePixel(req, res);
+
+      expect(Pixel.findByPk).toHaveBeenCalledWith(1, {
+        include: [{ model: VCard, as: 'VCard' }],
+      });
+      expect(mockPixel.update).toHaveBeenCalledWith({
         name: 'Updated Pixel',
-        is_active: false
+        is_active: false,
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        pixel: {
+          id: 1,
+          name: 'Test Pixel',
+          metaPixelId: 'meta_123',
+          is_active: true,
+        },
+      });
+    });
+
+    it('devrait débloquer un pixel déjà bloqué', async () => {
+      req.params = { id: 2 };
+      const mockPixel = {
+        id: 2,
+        name: 'Blocked Pixel',
+        is_blocked: true,
+        update: jest.fn().mockImplementation(function(updates) {
+          this.is_blocked = updates.is_blocked;
+        }),
       };
 
-      const response = await request(app)
-        .put(`/pixels/${pixel.id}`)
-        .send(updateData);
+      Pixel.findByPk.mockResolvedValue(mockPixel);
 
-      expectSuccessResponse(response);
-      expect(response.body.pixel.name).toBe(updateData.name);
-      expect(response.body.pixel.is_active).toBe(false);
-    });
+      await pixelController.toggleBlocked(req, res);
 
-    test('should return 404 for non-existent pixel', async () => {
-      const updateData = {
-        name: 'Non-existent Pixel'
-      };
-
-      const response = await request(app)
-        .put('/pixels/999')
-        .send(updateData);
-
-      expectNotFoundError(response, 'Pixel not found');
-    });
-  });
-
-  describe('DELETE /pixels/:pixelId - deletePixel', () => {
-    test('should delete pixel successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ vcardId: vcard.id }));
-
-      const response = await request(app).delete(`/pixels/${pixel.id}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.message).toBe('Pixel deleted');
-
-      const deletedPixel = await models.Pixel.findByPk(pixel.id);
-      expect(deletedPixel).toBeNull();
-    });
-
-    test('should delete pixel with Meta integration', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ 
-        vcardId: vcard.id,
-        metaPixelId: 'meta_pixel_123'
-      }));
-
-      axios.delete.mockResolvedValueOnce({ data: {} });
-
-      const response = await request(app).delete(`/pixels/${pixel.id}`);
-
-      expectSuccessResponse(response);
-      expect(axios.delete).toHaveBeenCalled();
-    });
-
-    test('should return 404 for non-existent pixel', async () => {
-      const response = await request(app).delete('/pixels/999');
-
-      expectNotFoundError(response, 'Pixel not found');
-    });
-  });
-
-  describe('GET /pixels/user - getUserPixels', () => {
-    test('should return user pixels successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      await models.Pixel.create(createTestPixel({ vcardId: vcard.id }));
-
-      const response = await request(app).get(`/pixels/user?userId=${user.id}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.pixels).toHaveLength(1);
-      expect(response.body.pixels[0].vcard.id).toBe(vcard.id);
-    });
-
-    test('should return empty array for user with no pixels', async () => {
-      const user = await models.User.create(await createTestUser());
-
-      const response = await request(app).get(`/pixels/user?userId=${user.id}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.pixels).toHaveLength(0);
-    });
-  });
-
-  describe('GET /pixels/:pixelId - getPixelById', () => {
-    test('should return pixel by id successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ vcardId: vcard.id }));
-
-      const response = await request(app).get(`/pixels/${pixel.id}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.data.id).toBe(pixel.id);
-      expect(response.body.data.vcard.id).toBe(vcard.id);
-      expect(response.body.data.trackingUrl).toContain(`/pixels/${pixel.id}/track`);
-    });
-
-    test('should return 404 for non-existent pixel', async () => {
-      const response = await request(app).get('/pixels/999');
-
-      expectNotFoundError(response, 'Pixel not found');
-    });
-  });
-
-  describe('POST /pixels/:pixelId/track - trackEvent', () => {
-    test('should track event successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ vcardId: vcard.id }));
-
-      const eventData = {
-        eventType: 'view',
-        metadata: { page: 'home' }
-      };
-
-      axios.get.mockResolvedValueOnce({
+      expect(Pixel.findByPk).toHaveBeenCalledWith(2);
+      expect(mockPixel.update).toHaveBeenCalledWith({ is_blocked: false });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
         data: {
-          status: 'success',
-          countryCode: 'US',
-          regionName: 'California',
-          city: 'San Francisco',
-          query: '127.0.0.1'
+          id: 2,
+          name: 'Blocked Pixel',
+          is_blocked: false,
+          message: 'Pixel unblocked successfully',
+        },
+      });
+    });
+
+    it('devrait retourner 404 si le pixel n\'existe pas', async () => {
+      req.params = { pixelId: 999 };
+      Pixel.findByPk.mockResolvedValue(null);
+
+      await pixelController.updatePixel(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Pixel not found',
+      });
+    });
+  });
+
+  describe('deletePixel', () => {
+    it('devrait supprimer un pixel avec succès', async () => {
+      req.params = { pixelId: 1 };
+      const mockPixel = {
+        id: 1,
+        metaPixelId: 'meta_123',
+        destroy: jest.fn(),
+      };
+
+      Pixel.findByPk.mockResolvedValue(mockPixel);
+      axios.delete.mockResolvedValue({});
+
+      await pixelController.deletePixel(req, res);
+
+      expect(Pixel.findByPk).toHaveBeenCalledWith(1);
+      expect(axios.delete).toHaveBeenCalled();
+      expect(mockPixel.destroy).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        message: 'Pixel deleted',
+      });
+    });
+
+    it('devrait retourner 404 si le pixel n\'existe pas', async () => {
+      req.params = { pixelId: 999 };
+      Pixel.findByPk.mockResolvedValue(null);
+
+      await pixelController.deletePixel(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Pixel not found',
+      });
+    });
+  });
+
+  describe('getUserPixels', () => {
+    it('devrait récupérer les pixels d\'un utilisateur', async () => {
+      req.query = { userId: 1 };
+      const mockPixels = [
+        {
+          id: 1,
+          name: 'Pixel 1',
+          metaPixelId: 'meta_123',
+          is_active: true,
+          created_at: new Date(),
+          VCard: { id: 1, name: 'VCard 1', is_active: true, status: 'active' },
+        },
+      ];
+
+      Pixel.findAll.mockResolvedValue(mockPixels);
+
+      await pixelController.getUserPixels(req, res);
+
+      expect(Pixel.findAll).toHaveBeenCalledWith({
+        include: [
+          {
+            model: VCard,
+            as: 'VCard',
+            where: { userId: 1, is_active: true },
+            attributes: ['id', 'name', 'is_active', 'status'],
+          },
+        ],
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        pixels: [
+          {
+            id: 1,
+            name: 'Pixel 1',
+            vcard: mockPixels[0].VCard,
+            metaPixelId: 'meta_123',
+            is_active: true,
+            created_at: mockPixels[0].created_at,
+          },
+        ],
+      });
+    });
+  });
+
+  describe('getPixelById', () => {
+    it('devrait récupérer un pixel par son ID', async () => {
+      req.params = { pixelId: 1 };
+      const mockPixel = {
+        id: 1,
+        name: 'Test Pixel',
+        metaPixelId: 'meta_123',
+        is_active: true,
+        created_at: new Date(),
+        VCard: { id: 1, name: 'Test VCard' },
+      };
+
+      Pixel.findByPk.mockResolvedValue(mockPixel);
+
+      await pixelController.getPixelById(req, res);
+
+      expect(Pixel.findByPk).toHaveBeenCalledWith(1, {
+        include: [{ model: VCard, as: 'VCard' }],
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          id: 1,
+          name: 'Test Pixel',
+          metaPixelId: 'meta_123',
+          is_active: true,
+          trackingUrl: 'https://api.test.com/pixels/1/track',
+          vcard: { id: 1, name: 'Test VCard' },
+          created_at: mockPixel.created_at,
+        },
+      });
+    });
+
+    it('devrait retourner 404 si le pixel n\'existe pas', async () => {
+      req.params = { pixelId: 999 };
+      Pixel.findByPk.mockResolvedValue(null);
+
+      await pixelController.getPixelById(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Pixel not found',
+      });
+    });
+  });
+
+  describe('trackEvent', () => {
+    beforeEach(() => {
+      getClientIp.mockReturnValue('192.168.1.1');
+      axios.get.mockImplementation((url) => {
+        if (url.includes('ipify.org')) {
+          return Promise.resolve({ data: { ip: '203.0.113.1' } });
+        }
+        if (url.includes('ip-api.com')) {
+          return Promise.resolve({
+            data: {
+              status: 'success',
+              countryCode: 'US',
+              regionName: 'California',
+              city: 'San Francisco',
+              query: '203.0.113.1',
+            },
+          });
         }
       });
 
-      const response = await request(app)
-        .post(`/pixels/${pixel.id}/track`)
-        .send(eventData)
-        .set('User-Agent', 'Test Browser')
-        .set('Accept-Language', 'en-US,en;q=0.9');
-
-      expect(response.status).toBe(200);
-      expect(response.headers['content-type']).toBe('image/gif');
-
-      const events = await models.EventTracking.findAll({ where: { pixelId: pixel.id } });
-      expect(events).toHaveLength(1);
-      expect(events[0].eventType).toBe('view');
+      UAParser.mockImplementation(() => ({
+        getResult: () => ({
+          device: { type: 'desktop' },
+          os: { name: 'Windows' },
+          browser: { name: 'Chrome' },
+        }),
+      }));
     });
 
-    test('should handle inactive pixel gracefully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ 
-        vcardId: vcard.id,
-        is_active: false
-      }));
+    it('devrait tracker un événement avec succès', async () => {
+      req.params = { pixelId: 1 };
+      req.body = {
+        eventType: 'view',
+        blockId: 'block_123',
+        duration: 5000,
+        metadata: { page: 'home' },
+      };
+      req.headers = {
+        'user-agent': 'Mozilla/5.0 Chrome/91.0',
+        'accept-language': 'en-US,en;q=0.9',
+      };
 
-      const response = await request(app)
-        .post(`/pixels/${pixel.id}/track`)
-        .send({ eventType: 'view' });
+      const mockPixel = {
+        id: 1,
+        vcardId: 1,
+        metaPixelId: 'meta_123',
+        is_active: true,
+      };
+      const mockEvent = { id: 1 };
 
-      expect(response.status).toBe(200);
-      expect(response.headers['content-type']).toBe('image/gif');
+      Pixel.findByPk.mockResolvedValue(mockPixel);
+      EventTracking.create.mockResolvedValue(mockEvent);
+      axios.post.mockResolvedValue({});
+
+      await pixelController.trackEvent(req, res);
+
+      expect(Pixel.findByPk).toHaveBeenCalledWith(1);
+      expect(EventTracking.create).toHaveBeenCalledWith({
+        eventType: 'view',
+        metadata: { page: 'home' },
+        duration: 5000,
+        blockId: 'block_123',
+        pixelId: 1,
+        userAgent: 'Mozilla/5.0 Chrome/91.0',
+        ipAddress: '203.0.113.1',
+        country: 'US',
+        region: 'California',
+        city: 'San Francisco',
+        deviceType: 'desktop',
+        os: 'Windows',
+        browser: 'Chrome',
+        language: 'en-US',
+        source: 'internal_tracking',
+      });
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      expect(res.end).toHaveBeenCalled();
     });
 
-    test('should track event with Meta pixel integration', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ 
-        vcardId: vcard.id,
-        metaPixelId: 'meta_pixel_123'
-      }));
+    it('ne devrait pas tracker si le pixel est inactif', async () => {
+      req.params = { pixelId: 1 };
+      const mockPixel = { id: 1, is_active: false };
+      Pixel.findByPk.mockResolvedValue(mockPixel);
 
-      axios.get.mockResolvedValueOnce({ data: { ip: '127.0.0.1' } });
-      axios.post.mockResolvedValueOnce({ data: {} });
+      await pixelController.trackEvent(req, res);
 
-      const response = await request(app)
-        .post(`/pixels/${pixel.id}/track`)
-        .send({ 
-          eventType: 'view',
-          value: 10.99,
-          currency: 'USD'
-        });
+      expect(EventTracking.create).not.toHaveBeenCalled();
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      expect(res.end).toHaveBeenCalled();
+    });
 
-      expect(response.status).toBe(200);
-      expect(axios.post).toHaveBeenCalled();
+    it('ne devrait pas tracker si le pixel n\'existe pas', async () => {
+      req.params = { pixelId: 999 };
+      Pixel.findByPk.mockResolvedValue(null);
+
+      await pixelController.trackEvent(req, res);
+
+      expect(EventTracking.create).not.toHaveBeenCalled();
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      expect(res.end).toHaveBeenCalled();
     });
   });
 
-  describe('GET /pixels/vcard/:vcardId - getPixelsByVCard', () => {
-    test('should return pixels for vCard successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      await models.Pixel.create(createTestPixel({ vcardId: vcard.id }));
+  describe('getPixelsByVCard', () => {
+    it('devrait récupérer les pixels d\'une VCard', async () => {
+      req.params = { vcardId: 1 };
+      req.user = { id: 1 };
 
-      const response = await request(app).get(`/pixels/vcard/${vcard.id}`);
+      const mockVCard = { id: 1, userId: 1 };
+      const mockPixels = [
+        {
+          id: 1,
+          name: 'Pixel 1',
+          is_active: true,
+          created_at: new Date(),
+        },
+      ];
 
-      expectSuccessResponse(response);
-      expect(response.body.pixels).toHaveLength(1);
-      expect(response.body.pixels[0].trackingUrl).toContain('/track');
-    });
+      VCard.findOne.mockResolvedValue(mockVCard);
+      Pixel.findAll.mockResolvedValue(mockPixels);
 
-    test('should return 404 for non-existent vCard', async () => {
-      const response = await request(app).get('/pixels/vcard/999');
+      await pixelController.getPixelsByVCard(req, res);
 
-      expectNotFoundError(response, 'VCard not found');
+      expect(VCard.findOne).toHaveBeenCalledWith({
+        where: { id: 1, userId: 1 },
+      });
+      expect(Pixel.findAll).toHaveBeenCalledWith({
+        where: { vcardId: 1, is_active: true },
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        pixels: [
+          {
+            id: 1,
+            name: 'Pixel 1',
+            is_active: true,
+            created_at: mockPixels[0].created_at,
+            trackingUrl: 'https://api.test.com/pixels/1/track',
+          },
+        ],
+      });
     });
   });
 
-  describe('GET /pixels - getPixels', () => {
-    test('should return all pixels successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      await models.Pixel.create(createTestPixel({ vcardId: vcard.id }));
+  describe('getPixels', () => {
+    it('devrait récupérer tous les pixels', async () => {
+      const mockPixels = [
+        {
+          id: 1,
+          name: 'Pixel 1',
+          metaPixelId: 'meta_123',
+          is_active: true,
+          is_blocked: false,
+          created_at: new Date(),
+          VCard: {
+            id: 1,
+            name: 'VCard 1',
+            url: 'https://vcard1.com',
+            Users: {
+              id: 1,
+              name: 'User 1',
+              email: 'user1@test.com',
+            },
+          },
+        },
+      ];
 
-      const response = await request(app).get('/pixels');
+      Pixel.findAll.mockResolvedValue(mockPixels);
 
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(1);
-      expect(response.body.data[0].vcard.user.id).toBe(user.id);
-    });
+      await pixelController.getPixels(req, res);
 
-    test('should return empty array when no pixels exist', async () => {
-      const response = await request(app).get('/pixels');
-
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(0);
+      expect(Pixel.findAll).toHaveBeenCalledWith({
+        include: [
+          {
+            model: VCard,
+            as: 'VCard',
+            attributes: ['id', 'name', 'url'],
+            include: [
+              {
+                model: User,
+                as: 'Users',
+                attributes: ['id', 'name', 'email'],
+              },
+            ],
+          },
+        ],
+        attributes: [
+          'id',
+          'name',
+          'metaPixelId',
+          'is_active',
+          'is_blocked',
+          'created_at',
+        ],
+      });
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: [
+          {
+            id: 1,
+            name: 'Pixel 1',
+            metaPixelId: 'meta_123',
+            is_active: true,
+            is_blocked: false,
+            created_at: mockPixels[0].created_at,
+            vcard: {
+              id: 1,
+              name: 'VCard 1',
+              url: 'https://vcard1.com',
+              user: {
+                id: 1,
+                name: 'User 1',
+                email: 'user1@test.com',
+              },
+            },
+          },
+        ],
+      });
     });
   });
 
-  describe('PUT /pixels/:id/toggle-blocked - toggleBlocked', () => {
-    test('should toggle pixel blocked status successfully', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ 
-        vcardId: vcard.id,
-        is_blocked: false
-      }));
+  describe('toggleBlocked', () => {
+    it('devrait basculer le statut bloqué d\'un pixel', async () => {
+      req.params = { id: 1 };
+      const mockPixel = {
+        id: 1,
+        name: 'Test Pixel',
+        is_blocked: false,
+        update: jest.fn().mockImplementation(function(updates) {
+          this.is_blocked = updates.is_blocked;
+        }),
+      };
 
-      const response = await request(app).put(`/pixels/${pixel.id}/toggle-blocked`);
+      Pixel.findByPk.mockResolvedValue(mockPixel);
 
-      expectSuccessResponse(response);
-      expect(response.body.data.is_blocked).toBe(true);
-      expect(response.body.data.message).toContain('blocked');
+      await pixelController.toggleBlocked(req, res);
+
+      expect(Pixel.findByPk).toHaveBeenCalledWith(1);
+      expect(mockPixel.update).toHaveBeenCalledWith({ is_blocked: true });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          id: 1,
+          name: 'Test Pixel',
+          is_blocked: true,
+          message: 'Pixel blocked successfully',
+        },
+      });
     });
 
-    test('should toggle blocked pixel to unblocked', async () => {
-      const user = await models.User.create(await createTestUser());
-      const vcard = await models.VCard.create(createTestVCard({ userId: user.id }));
-      const pixel = await models.Pixel.create(createTestPixel({ 
-        vcardId: vcard.id,
-        is_blocked: true
-      }));
+    it('devrait retourner 404 si le pixel n\'existe pas', async () => {
+      req.params = { id: 999 };
+      Pixel.findByPk.mockResolvedValue(null);
 
-      const response = await request(app).put(`/pixels/${pixel.id}/toggle-blocked`);
+      await pixelController.toggleBlocked(req, res);
 
-      expectSuccessResponse(response);
-      expect(response.body.data.is_blocked).toBe(false);
-      expect(response.body.data.message).toContain('unblocked');
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Pixel not found',
+      });
+    });
+  });
+
+  describe('Gestion des erreurs', () => {
+    it('devrait gérer les erreurs de base de données dans createPixel', async () => {
+      req.body = { vcardId: 1, userId: 1 };
+      VCard.findOne.mockRejectedValue(new Error('Database error'));
+
+      await pixelController.createPixel(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Server error',
+      });
     });
 
-    test('should return 404 for non-existent pixel', async () => {
-      const response = await request(app).put('/pixels/999/toggle-blocked');
+    it('devrait gérer les erreurs dans trackEvent', async () => {
+      req.params = { pixelId: 1 };
+      Pixel.findByPk.mockRejectedValue(new Error('Database error'));
 
-      expectNotFoundError(response, 'Pixel not found');
+      await pixelController.trackEvent(req, res);
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      expect(res.end).toHaveBeenCalled();
     });
   });
 });

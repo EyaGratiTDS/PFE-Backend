@@ -1,283 +1,705 @@
-const request = require('supertest');
-const express = require('express');
-const subscriptionController = require('../../controllers/SubscriptionController');
-const { createTestToken, createTestUser, expectSuccessResponse, expectErrorResponse } = require('../utils/testHelpers');
+const {
+  cancelSubscription,
+  getUserSubscription,
+  checkExpiredSubscriptions,
+  getUserSubscriptions,
+  getSubscriptionStatus,
+  getAllSubscriptions,
+  cancelSubscriptionByAdmin,
+  assignPlanToUser
+} = require('../../controllers/SubscriptionController');
 
-jest.mock('../../models', () => require('../utils/mockModels'));
-jest.mock('stripe', () => ({
-  subscriptions: {
-    create: jest.fn(),
-    cancel: jest.fn(),
-    retrieve: jest.fn(),
-    update: jest.fn(),
-    list: jest.fn()
-  },
-  customers: {
-    create: jest.fn(),
-    retrieve: jest.fn()
-  },
-  prices: {
-    retrieve: jest.fn()
-  }
-}));
+const { Op } = require('sequelize');
 
-const app = express();
-app.use(express.json());
+jest.mock('../../models/Subscription');
+jest.mock('../../models');
+jest.mock('../../controllers/NotificationController');
+jest.mock('node-cron');
 
-app.get('/subscriptions', subscriptionController.getUserSubscriptions);
-app.get('/subscriptions/current', subscriptionController.getUserSubscription);
-app.delete('/subscriptions/cancel', subscriptionController.cancelSubscription);
-app.get('/subscriptions/status', subscriptionController.getSubscriptionStatus);
-app.get('/admin/subscriptions', subscriptionController.getAllSubscriptions);
-app.delete('/admin/subscriptions/:id', subscriptionController.cancelSubscriptionByAdmin);
-app.post('/admin/subscriptions/assign', subscriptionController.assignPlanToUser);
+const Subscription = require('../../models/Subscription');
+const db = require('../../models');
+const SubscriptionNotificationService = require('../../controllers/NotificationController');
 
-describe('SubscriptionController', () => {
-  let mockModels;
-  let authToken;
-  let testUser;
-  let testSubscription;
-  let stripe;
+describe('Subscription Controller', () => {
+  let req, res, mockSubscription, mockUser, mockPlan;
 
   beforeEach(() => {
-    const { createMockModels } = require('../utils/mockModels');
-    mockModels = createMockModels();
-    testUser = createTestUser();
-    testSubscription = {
-      id: 1,
-      userId: 1,
-      planId: 1,
-      stripeSubscriptionId: 'sub_test123',
-      status: 'active',
-      current_period_start: new Date(),
-      current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      cancel_at_period_end: false,
-      created_at: new Date()
+    req = {
+      body: {},
+      query: {},
+      params: {}
     };
-    authToken = createTestToken({ id: 1, email: testUser.email });
-    stripe = require('stripe');
+    res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn().mockReturnThis()
+    };
 
+    mockSubscription = {
+      id: 1,
+      user_id: 123,
+      plan_id: 1,
+      start_date: new Date('2025-01-01'),
+      end_date: new Date('2025-02-01'),
+      status: 'active',
+      created_at: new Date('2025-01-01'),
+      payment_method: 'card',
+      toJSON: jest.fn().mockReturnValue({
+        id: 1,
+        user_id: 123,
+        plan_id: 1,
+        status: 'active'
+      }),
+      update: jest.fn(),
+      Plan: {
+        name: 'Pro',
+        price: 29.99
+      },
+      Users: {
+        name: 'John Doe',
+        email: 'john@example.com'
+      }
+    };
+
+    mockUser = {
+      id: 123,
+      name: 'John Doe',
+      email: 'john@example.com'
+    };
+
+    mockPlan = {
+      id: 1,
+      name: 'Pro',
+      price: 29.99
+    };
+
+    Subscription.findAll = jest.fn();
+    Subscription.findOne = jest.fn();
+    Subscription.findByPk = jest.fn();
+    Subscription.create = jest.fn();
+    Subscription.update = jest.fn();
+    
+    db.Users = {
+      findByPk: jest.fn()
+    };
+    
+    db.Plan = {
+      findByPk: jest.fn()
+    };
+
+    // Mock des services de notification
+    SubscriptionNotificationService.sendSubscriptionStatusNotification = jest.fn();
+    SubscriptionNotificationService.checkExpiringSubscriptions = jest.fn();
+    SubscriptionNotificationService.sendAdminAssignedNotification = jest.fn();
+
+    // Mock console pour éviter le spam
+    console.log = jest.fn();
+    console.error = jest.fn();
+  });
+
+  afterEach(() => {
     jest.clearAllMocks();
   });
 
-  describe('GET /subscriptions', () => {
-    test('should get user subscriptions successfully', async () => {
-      const subscriptions = [
-        testSubscription,
-        { ...testSubscription, id: 2, status: 'canceled' }
-      ];
+  describe('checkExpiredSubscriptions', () => {
+    test('should update expired subscriptions and send notifications', async () => {
+      const expiredSubs = [mockSubscription];
+      Subscription.findAll.mockResolvedValue(expiredSubs);
+      Subscription.update.mockResolvedValue([1]);
 
-      mockModels.Subscription.findAll.mockResolvedValue(subscriptions);
+      const result = await checkExpiredSubscriptions();
 
-      const response = await request(app)
-        .get('/subscriptions')
-        .set('Authorization', `Bearer ${authToken}`);
+      expect(Subscription.findAll).toHaveBeenCalledWith({
+        where: {
+          end_date: { [Op.lt]: expect.any(Date) },
+          status: 'active'
+        }
+      });
 
-      expectSuccessResponse(response);
-      expect(response.body.data).toHaveLength(2);
-      expect(mockModels.Subscription.findAll).toHaveBeenCalledWith({
-        where: { userId: 1 },
-        include: [{ model: mockModels.Plan, as: 'Plan' }],
-        order: [['created_at', 'DESC']]
+      expect(Subscription.update).toHaveBeenCalledWith(
+        { status: 'expired' },
+        {
+          where: {
+            end_date: { [Op.lt]: expect.any(Date) },
+            status: 'active'
+          }
+        }
+      );
+
+      expect(SubscriptionNotificationService.sendSubscriptionStatusNotification)
+        .toHaveBeenCalledWith(mockSubscription, 'expired');
+
+      expect(result).toEqual([1]);
+    });
+
+    test('should handle errors in checkExpiredSubscriptions', async () => {
+      const error = new Error('Database error');
+      Subscription.findAll.mockRejectedValue(error);
+
+      await expect(checkExpiredSubscriptions()).rejects.toThrow('Database error');
+      expect(console.error).toHaveBeenCalledWith('Error checking expired subscriptions:', error);
+    });
+  });
+
+  describe('getUserSubscription', () => {
+    test('should return user subscription successfully', async () => {
+      req.query.userId = '123';
+      Subscription.findOne.mockResolvedValue(mockSubscription);
+
+      await getUserSubscription(req, res);
+
+      expect(Subscription.findOne).toHaveBeenCalledWith({
+        where: {
+          user_id: '123',
+          status: 'active'
+        },
+        include: [{
+          model: db.Plan,
+          as: 'Plan'
+        }]
+      });
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: mockSubscription
       });
     });
 
-    test('should filter subscriptions by status', async () => {
-      mockModels.Subscription.findAll.mockResolvedValue([testSubscription]);
+    test('should return 400 when userId is missing', async () => {
+      await getUserSubscription(req, res);
 
-      const response = await request(app)
-        .get('/subscriptions?status=active')
-        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User ID is required'
+      });
+    });
 
-      expectSuccessResponse(response);
-      expect(mockModels.Subscription.findAll).toHaveBeenCalledWith({
-        where: { userId: 1, status: 'active' },
-        include: [{ model: mockModels.Plan, as: 'Plan' }],
-        order: [['created_at', 'DESC']]
+    test('should return message when no active subscription found', async () => {
+      req.query.userId = '123';
+      Subscription.findOne.mockResolvedValue(null);
+
+      await getUserSubscription(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'No active subscription found'
+      });
+    });
+
+    test('should handle database errors', async () => {
+      req.query.userId = '123';
+      const error = new Error('Database error');
+      Subscription.findOne.mockRejectedValue(error);
+
+      await getUserSubscription(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Internal server error',
+        details: undefined
       });
     });
   });
 
-  describe('POST /subscriptions', () => {
-    test('should create subscription successfully', async () => {
-      const subscriptionData = {
-        planId: 1,
-        paymentMethodId: 'pm_test123'
-      };
-
-      const plan = {
-        id: 1,
-        name: 'Premium Plan',
-        stripePriceId: 'price_test123',
-        price: 999
-      };
-
-      const stripeCustomer = { id: 'cus_test123' };
-      const stripeSubscription = {
-        id: 'sub_test123',
-        status: 'active',
-        current_period_start: Math.floor(Date.now() / 1000),
-        current_period_end: Math.floor((Date.now() + 30 * 24 * 60 * 60 * 1000) / 1000)
-      };
-
-      mockModels.Plan.findByPk.mockResolvedValue(plan);
-      mockModels.User.findByPk.mockResolvedValue(testUser);
-      stripe.customers.create.mockResolvedValue(stripeCustomer);
-      stripe.subscriptions.create.mockResolvedValue(stripeSubscription);
-      mockModels.Subscription.create.mockResolvedValue({
-        ...testSubscription,
-        ...subscriptionData
-      });
-
-      const response = await request(app)
-        .post('/subscriptions')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send(subscriptionData);
-
-      expectSuccessResponse(response);
-      expect(response.status).toBe(201);
-    });
-
-    test('should return error for invalid plan', async () => {
-      mockModels.Plan.findByPk.mockResolvedValue(null);
-
-      const response = await request(app)
-        .post('/subscriptions')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ planId: 999, paymentMethodId: 'pm_test123' });
-
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('Plan not found');
-    });
-
-    test('should handle stripe errors', async () => {
-      const plan = { id: 1, stripePriceId: 'price_test123' };
-      mockModels.Plan.findByPk.mockResolvedValue(plan);
-      mockModels.User.findByPk.mockResolvedValue(testUser);
-      stripe.customers.create.mockRejectedValue(new Error('Stripe error'));
-
-      const response = await request(app)
-        .post('/subscriptions')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ planId: 1, paymentMethodId: 'pm_test123' });
-
-      expectErrorResponse(response);
-    });
-  });
-
-  describe('GET /subscriptions/:id', () => {
-    test('should get subscription by id', async () => {
-      mockModels.Subscription.findOne.mockResolvedValue(testSubscription);
-
-      const response = await request(app)
-        .get('/subscriptions/1')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
-      expect(response.body.data.status).toBe('active');
-    });
-
-    test('should return 404 for non-existent subscription', async () => {
-      mockModels.Subscription.findOne.mockResolvedValue(null);
-
-      const response = await request(app)
-        .get('/subscriptions/999')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expect(response.status).toBe(404);
-    });
-  });
-
-  describe('DELETE /subscriptions/:id', () => {
+  describe('cancelSubscription', () => {
     test('should cancel subscription successfully', async () => {
-      mockModels.Subscription.findOne.mockResolvedValue(testSubscription);
-      stripe.subscriptions.cancel.mockResolvedValue({
-        ...testSubscription,
-        status: 'canceled'
+      req.body.userId = 123;
+      const endDate = new Date('2025-02-01');
+      const now = new Date('2025-01-15');
+      jest.spyOn(Date, 'now').mockReturnValue(now.getTime());
+      
+      const subscriptionWithEndDate = {
+        ...mockSubscription,
+        end_date: endDate,
+        update: jest.fn().mockResolvedValue(true)
+      };
+      
+      Subscription.findOne.mockResolvedValue(subscriptionWithEndDate);
+
+      await cancelSubscription(req, res);
+
+      expect(Subscription.findOne).toHaveBeenCalledWith({
+        where: { user_id: 123, status: 'active' }
       });
-      mockModels.Subscription.update.mockResolvedValue([1]);
 
-      const response = await request(app)
-        .delete('/subscriptions/1')
-        .set('Authorization', `Bearer ${authToken}`);
+      expect(subscriptionWithEndDate.update).toHaveBeenCalledWith({
+        status: 'canceled',
+        days_remaining: expect.any(Number),
+        end_date: expect.any(Date)
+      });
 
-      expectSuccessResponse(response);
-      expect(stripe.subscriptions.cancel).toHaveBeenCalledWith('sub_test123');
+      expect(SubscriptionNotificationService.sendSubscriptionStatusNotification)
+        .toHaveBeenCalledWith(subscriptionWithEndDate, 'canceled');
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        message: 'Subscription canceled successfully',
+        data: {
+          canceled_at: expect.any(Date),
+          days_remaining: expect.any(Number)
+        }
+      });
     });
 
-    test('should handle immediate cancellation', async () => {
-      mockModels.Subscription.findOne.mockResolvedValue(testSubscription);
-      stripe.subscriptions.cancel.mockResolvedValue({
-        status: 'canceled'
+    test('should return 400 when userId is missing', async () => {
+      await cancelSubscription(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User ID is required'
       });
-      mockModels.Subscription.update.mockResolvedValue([1]);
+    });
 
-      const response = await request(app)
-        .delete('/subscriptions/1?immediate=true')
-        .set('Authorization', `Bearer ${authToken}`);
+    test('should return 404 when no active subscription found', async () => {
+      req.body.userId = 123;
+      Subscription.findOne.mockResolvedValue(null);
 
-      expectSuccessResponse(response);
+      await cancelSubscription(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'No active subscription found'
+      });
     });
   });
 
-  describe('POST /subscriptions/:id/resume', () => {
-    test('should resume subscription successfully', async () => {
-      const canceledSubscription = {
-        ...testSubscription,
+  describe('getUserSubscriptions', () => {
+    test('should return user subscriptions successfully', async () => {
+      req.query.userId = '123';
+      const subscriptions = [mockSubscription];
+      Subscription.findAll.mockResolvedValue(subscriptions);
+
+      await getUserSubscriptions(req, res);
+
+      expect(Subscription.findAll).toHaveBeenCalledWith({
+        where: { user_id: '123' },
+        order: [['created_at', 'DESC']]
+      });
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: [{
+          id: mockSubscription.id,
+          status: mockSubscription.status,
+          start_date: mockSubscription.start_date,
+          end_date: mockSubscription.end_date,
+          created_at: mockSubscription.created_at,
+          plan_id: mockSubscription.plan_id,
+          payment_method: mockSubscription.payment_method
+        }]
+      });
+    });
+
+    test('should return empty array when no subscriptions found', async () => {
+      req.query.userId = '123';
+      Subscription.findAll.mockResolvedValue([]);
+
+      await getUserSubscriptions(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: [],
+        message: 'No subscriptions found for this user'
+      });
+    });
+
+    test('should return 400 when userId is missing', async () => {
+      await getUserSubscriptions(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User ID is required'
+      });
+    });
+  });
+
+  describe('getSubscriptionStatus', () => {
+    test('should return subscription status with days left and notification info', async () => {
+      req.query.userId = '123';
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 3); // 3 days remaining
+      
+      const subscription = {
+        ...mockSubscription,
+        end_date: futureDate,
+        toJSON: jest.fn().mockReturnValue({
+          id: 1,
+          user_id: 123,
+          status: 'active'
+        })
+      };
+      
+      Subscription.findOne.mockResolvedValue(subscription);
+
+      await getSubscriptionStatus(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          id: 1,
+          user_id: 123,
+          status: 'active',
+          days_left: 3,
+          should_notify: true,
+          notification_message: 'Your subscription expires in 3 day(s)'
+        }
+      });
+    });
+
+    test('should return null when no active subscription found', async () => {
+      req.query.userId = '123';
+      Subscription.findOne.mockResolvedValue(null);
+
+      await getSubscriptionStatus(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: null,
+        message: 'No active subscription found'
+      });
+    });
+  });
+
+  describe('getAllSubscriptions', () => {
+    test('should return all subscriptions with user and plan info', async () => {
+      const subscriptions = [mockSubscription];
+      Subscription.findAll.mockResolvedValue(subscriptions);
+
+      await getAllSubscriptions(req, res);
+
+      expect(Subscription.findAll).toHaveBeenCalledWith({
+        include: [
+          {
+            model: db.Users,
+            as: 'Users',
+            attributes: ['name', 'email']
+          },
+          {
+            model: db.Plan,
+            as: 'Plan',
+            attributes: ['name', 'price']
+          }
+        ],
+        order: [['created_at', 'DESC']]
+      });
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        count: 1,
+        data: [{
+          id: mockSubscription.id,
+          start_date: mockSubscription.start_date,
+          end_date: mockSubscription.end_date,
+          status: mockSubscription.status,
+          created_at: mockSubscription.created_at,
+          user: {
+            id: mockSubscription.user_id,
+            name: mockSubscription.Users.name,
+            email: mockSubscription.Users.email
+          },
+          plan: {
+            id: mockSubscription.plan_id,
+            name: mockSubscription.Plan.name,
+            price: mockSubscription.Plan.price
+          }
+        }]
+      });
+    });
+  });
+
+  describe('cancelSubscriptionByAdmin', () => {
+    test('should cancel subscription by admin successfully', async () => {
+      req.params.id = '1';
+      const subscription = {
+        ...mockSubscription,
+        update: jest.fn().mockResolvedValue(true)
+      };
+      Subscription.findByPk.mockResolvedValue(subscription);
+
+      await cancelSubscriptionByAdmin(req, res);
+
+      expect(Subscription.findByPk).toHaveBeenCalledWith('1');
+      expect(subscription.update).toHaveBeenCalledWith({
         status: 'canceled',
-        cancel_at_period_end: true
+        days_remaining: expect.any(Number),
+        end_date: expect.any(Date)
+      });
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        message: 'Subscription canceled successfully',
+        data: {
+          canceled_at: expect.any(Date),
+          days_remaining: expect.any(Number)
+        }
+      });
+    });
+
+    test('should return 400 when subscription ID is missing', async () => {
+      await cancelSubscriptionByAdmin(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Subscription ID is required'
+      });
+    });
+
+    test('should return 404 when subscription not found', async () => {
+      req.params.id = '999';
+      Subscription.findByPk.mockResolvedValue(null);
+
+      await cancelSubscriptionByAdmin(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Subscription not found'
+      });
+    });
+
+    test('should return 400 when subscription is not active', async () => {
+      req.params.id = '1';
+      const inactiveSubscription = { ...mockSubscription, status: 'expired' };
+      Subscription.findByPk.mockResolvedValue(inactiveSubscription);
+
+      await cancelSubscriptionByAdmin(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Only active subscriptions can be canceled'
+      });
+    });
+  });
+
+  describe('assignPlanToUser', () => {
+    beforeEach(() => {
+      db.Users.findByPk.mockResolvedValue(mockUser);
+      db.Plan.findByPk.mockResolvedValue(mockPlan);
+      Subscription.findOne.mockResolvedValue(null);
+      Subscription.create.mockResolvedValue(mockSubscription);
+    });
+
+    test('should assign plan to user successfully', async () => {
+      req.body = {
+        userId: 123,
+        planId: 1,
+        duration: '30',
+        unit: 'days'
       };
 
-      mockModels.Subscription.findOne.mockResolvedValue(canceledSubscription);
-      stripe.subscriptions.update.mockResolvedValue({
-        ...canceledSubscription,
-        cancel_at_period_end: false,
+      await assignPlanToUser(req, res);
+
+      expect(db.Users.findByPk).toHaveBeenCalledWith(123);
+      expect(db.Plan.findByPk).toHaveBeenCalledWith(1);
+      expect(Subscription.create).toHaveBeenCalledWith({
+        user_id: 123,
+        plan_id: 1,
+        start_date: expect.any(Date),
+        end_date: expect.any(Date),
         status: 'active'
       });
-      mockModels.Subscription.update.mockResolvedValue([1]);
 
-      const response = await request(app)
-        .post('/subscriptions/1/resume')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
+      expect(res.status).toHaveBeenCalledWith(201);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        message: 'Plan "Pro" (30 days) successfully assigned to user',
+        data: mockSubscription
+      });
     });
 
-    test('should not resume already active subscription', async () => {
-      mockModels.Subscription.findOne.mockResolvedValue(testSubscription);
+    test('should handle free plan assignment', async () => {
+      req.body = {
+        userId: 123,
+        planId: 1,
+        duration: '30',
+        unit: 'days'
+      };
 
-      const response = await request(app)
-        .post('/subscriptions/1/resume')
-        .set('Authorization', `Bearer ${authToken}`);
+      const freePlan = { ...mockPlan, name: 'Free' };
+      db.Plan.findByPk.mockResolvedValue(freePlan);
 
-      expectErrorResponse(response);
-      expect(response.body.message).toContain('already active');
+      const existingSubscription = {
+        ...mockSubscription,
+        update: jest.fn().mockResolvedValue(true)
+      };
+      Subscription.findOne.mockResolvedValue(existingSubscription);
+
+      await assignPlanToUser(req, res);
+
+      expect(existingSubscription.update).toHaveBeenCalledWith({
+        status: 'canceled',
+        end_date: expect.any(Date)
+      });
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        message: 'User downgraded to Free plan. Active subscription canceled.'
+      });
+    });
+
+    test('should handle unlimited duration', async () => {
+      req.body = {
+        userId: 123,
+        planId: 1,
+        duration: 'unlimited',
+        unit: 'days'
+      };
+
+      await assignPlanToUser(req, res);
+
+      expect(Subscription.create).toHaveBeenCalledWith({
+        user_id: 123,
+        plan_id: 1,
+        start_date: expect.any(Date),
+        end_date: expect.any(Date), // Should be 10 years from now
+        status: 'active'
+      });
+    });
+
+    test('should handle different time units', async () => {
+      req.body = {
+        userId: 123,
+        planId: 1,
+        duration: '1',
+        unit: 'months'
+      };
+
+      await assignPlanToUser(req, res);
+
+      expect(Subscription.create).toHaveBeenCalled();
+    });
+
+    test('should return 400 when required fields are missing', async () => {
+      req.body = { userId: 123 }; // Missing planId
+
+      await assignPlanToUser(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User ID and Plan ID are required'
+      });
+    });
+
+    test('should return 404 when user not found', async () => {
+      req.body = { userId: 999, planId: 1 };
+      db.Users.findByPk.mockResolvedValue(null);
+
+      await assignPlanToUser(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User not found'
+      });
+    });
+
+    test('should return 404 when plan not found', async () => {
+      req.body = { userId: 123, planId: 999 };
+      db.Plan.findByPk.mockResolvedValue(null);
+
+      await assignPlanToUser(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Plan not found'
+      });
+    });
+
+    test('should return 400 for invalid duration unit', async () => {
+      req.body = {
+        userId: 123,
+        planId: 1,
+        duration: '30',
+        unit: 'invalid'
+      };
+
+      await assignPlanToUser(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Invalid duration unit'
+      });
+    });
+
+    test('should cancel existing subscription before creating new one', async () => {
+      req.body = {
+        userId: 123,
+        planId: 1,
+        duration: '30',
+        unit: 'days'
+      };
+
+      const existingSubscription = {
+        ...mockSubscription,
+        update: jest.fn().mockResolvedValue(true)
+      };
+      Subscription.findOne.mockResolvedValue(existingSubscription);
+
+      await assignPlanToUser(req, res);
+
+      expect(existingSubscription.update).toHaveBeenCalledWith({
+        status: 'canceled',
+        end_date: expect.any(Date)
+      });
+
+      expect(SubscriptionNotificationService.sendSubscriptionStatusNotification)
+        .toHaveBeenCalledWith(existingSubscription, 'canceled');
+
+      expect(Subscription.create).toHaveBeenCalled();
     });
   });
 
-  describe('GET /subscriptions/:id/invoices', () => {
-    test('should get subscription invoices', async () => {
-      mockModels.Subscription.findOne.mockResolvedValue(testSubscription);
-      
-      const invoices = [
-        {
-          id: 'in_test123',
-          amount_paid: 999,
-          status: 'paid',
-          created: Math.floor(Date.now() / 1000)
-        }
-      ];
+  describe('Error handling', () => {
+    test('should handle database errors gracefully', async () => {
+      req.query.userId = '123';
+      const error = new Error('Database connection failed');
+      Subscription.findOne.mockRejectedValue(error);
 
-      stripe.subscriptions.retrieve.mockResolvedValue({
-        ...testSubscription,
-        latest_invoice: 'in_test123'
+      await getUserSubscription(req, res);
+
+      expect(console.error).toHaveBeenCalledWith('Error:', error);
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Internal server error',
+        details: undefined // Should be undefined in non-development environment
+      });
+    });
+
+    test('should include error details in development environment', async () => {
+      process.env.NODE_ENV = 'development';
+      req.query.userId = '123';
+      const error = new Error('Database connection failed');
+      Subscription.findOne.mockRejectedValue(error);
+
+      await getUserSubscription(req, res);
+
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Internal server error',
+        details: 'Database connection failed'
       });
 
-      const response = await request(app)
-        .get('/subscriptions/1/invoices')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expectSuccessResponse(response);
+      delete process.env.NODE_ENV;
     });
   });
 });

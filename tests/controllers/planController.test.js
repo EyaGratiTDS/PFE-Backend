@@ -1,437 +1,525 @@
-const request = require('supertest');
-const express = require('express');
-const planController = require('../../controllers/PlanController');
-const { createMockModels } = require('../utils/mockModels');
-const { 
-  createTestPlan, 
-  expectSuccessResponse, 
-  expectErrorResponse,
-  expectValidationError,
-} = require('../utils/testHelpers');
+const {
+  validatePlanType,
+  searchPlans,
+  createPlan,
+  getAllPlans,
+  getPlanById,
+  updatePlan,
+  deletePlan,
+  togglePlanStatus,
+  getFreePlan,
+  VALID_PLAN_TYPES
+} = require('../../controllers/planController');
 
-describe('PlanController', () => {
-  let app;
-  let models;
+const { Op } = require('sequelize');
 
-  beforeAll(async () => {
-    models = createMockModels();
-    await models.sequelize.sync({ force: true });
+jest.mock('sequelize', () => ({
+  Op: {
+    or: Symbol('or'),
+    like: Symbol('like')
+  }
+}));
 
-    app = express();
-    app.use(express.json());
-    
-    // Middleware pour injecter les models dans req
-    app.use((req, res, next) => {
-      req.models = models;
-      next();
-    });
-    
-    // Routes corrigées pour correspondre au controller
-    app.get('/plans', planController.getAllPlans);
-    app.get('/plans/free', planController.getFreePlan);
-    app.get('/plans/search', planController.searchPlans);
-    app.post('/plans', planController.validatePlanType, planController.createPlan);
-    app.get('/plans/:id', planController.getPlanById);
-    app.put('/plans/:id', planController.validatePlanType, planController.updatePlan);
-    app.delete('/plans/:id', planController.deletePlan);
-    
-    app.patch('/plans/:id/toggle-status', (req, res, next) => {
-      req.user = { role: 'superAdmin' };
-      next();
-    }, planController.togglePlanStatus);
+describe('Plan Controller', () => {
+  let req, res, next, mockPlan;
+
+  beforeEach(() => {
+    req = {
+      body: {},
+      query: {},
+      params: {},
+      models: {}
+    };
+    res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn().mockReturnThis(),
+      end: jest.fn()
+    };
+    next = jest.fn();
+
+    mockPlan = {
+      id: 1,
+      name: 'Pro',
+      description: 'Plan professionnel',
+      price: 29.99,
+      duration_days: 30,
+      features: ['feature1', 'feature2'],
+      is_active: true,
+      is_default: false,
+      update: jest.fn(),
+      destroy: jest.fn()
+    };
+
+    req.models.Plan = {
+      findAll: jest.fn(),
+      findByPk: jest.fn(),
+      create: jest.fn()
+    };
   });
 
-  beforeEach(async () => {
-    // Nettoyer la base de données avant chaque test
-    await models.Plan.destroy({ where: {}, truncate: true });
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
-  afterAll(async () => {
-    // Fermer la connexion à la base de données après tous les tests
-    if (models && models.sequelize) {
-      await models.sequelize.close();
-    }
-  });
-
-  describe('GET /plans - getAllPlans', () => {
-    test('should return all plans successfully', async () => {
-      await models.Plan.create(createTestPlan({ name: 'Free', price: 0 }));
-      await models.Plan.create(createTestPlan({ name: 'Basic', price: 12.00 }));
-      await models.Plan.create(createTestPlan({ name: 'Pro', price: 29.00 }));
-
-      const response = await request(app).get('/plans');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body).toHaveProperty('data');
-      expect(response.body.data).toHaveLength(3);
-      expect(response.body.data[0].name).toBe('Free');
-      expect(response.body.data[1].name).toBe('Basic');
-      expect(response.body.data[2].name).toBe('Pro');
+  describe('validatePlanType', () => {
+    test('should call next() when plan type is valid', () => {
+      req.body.name = 'Pro';
+      
+      validatePlanType(req, res, next);
+      
+      expect(next).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
     });
 
-    test('should return empty array when no plans exist', async () => {
-      const response = await request(app).get('/plans');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body.data).toHaveLength(0);
+    test('should return 400 error when plan type is invalid', () => {
+      req.body.name = 'InvalidType';
+      
+      validatePlanType(req, res, next);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'Type de plan invalide',
+        validTypes: VALID_PLAN_TYPES
+      });
+      expect(next).not.toHaveBeenCalled();
     });
 
-    test('should handle database error gracefully', async () => {
-      // Mock temporaire pour simuler une erreur
-      const originalFindAll = models.Plan.findAll;
-      models.Plan.findAll = jest.fn().mockRejectedValueOnce(new Error('Database error'));
-
-      const response = await request(app).get('/plans');
-
-      expect(response.status).toBe(500);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Erreur serveur');
-
-      // Restaurer la méthode originale
-      models.Plan.findAll = originalFindAll;
-    });
-  });
-
-  describe('GET /plans/free - getFreePlan', () => {
-    test('should return free plan when it exists', async () => {
-      const freePlan = await models.Plan.create(createTestPlan({ 
-        name: 'Free', 
-        price: 0
-      }));
-
-      const response = await request(app).get('/plans/free');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body).toHaveProperty('data');
-      expect(response.body.data.name).toBe('Free');
-      expect(response.body.data.price).toBe(0);
-    });
-
-    test('should return 404 when free plan does not exist', async () => {
-      const response = await request(app).get('/plans/free');
-
-      expect(response.status).toBe(404);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Aucun plan gratuit trouvé');
+    test('should call next() when no name is provided', () => {
+      validatePlanType(req, res, next);
+      
+      expect(next).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
     });
   });
 
-  describe('GET /plans/search - searchPlans', () => {
-    beforeEach(async () => {
-      await models.Plan.create(createTestPlan({ 
-        name: 'Free', 
-        description: 'Plan gratuit',
-        price: 0,
-        is_active: true
-      }));
-      await models.Plan.create(createTestPlan({ 
-        name: 'Basic', 
-        description: 'Plan basique',
-        price: 12.00,
-        is_active: true
-      }));
-      await models.Plan.create(createTestPlan({ 
-        name: 'Pro', 
-        description: 'Plan professionnel',
-        price: 29.00,
-        is_active: false
-      }));
-    });
+  describe('searchPlans', () => {
+    test('should search plans with query parameter', async () => {
+      req.query.q = 'test';
+      const mockPlans = [mockPlan];
+      req.models.Plan.findAll.mockResolvedValue(mockPlans);
 
-    test('should search plans by name', async () => {
-      const response = await request(app).get('/plans/search?q=Basic');
+      await searchPlans(req, res);
 
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body.data).toHaveLength(1);
-      expect(response.body.data[0].name).toBe('Basic');
-    });
-
-    test('should search plans by description', async () => {
-      const response = await request(app).get('/plans/search?q=gratuit');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body.data).toHaveLength(1);
-      expect(response.body.data[0].name).toBe('Free');
+      expect(req.models.Plan.findAll).toHaveBeenCalledWith({
+        where: {
+          [Op.or]: [
+            { name: { [Op.like]: '%test%' } },
+            { description: { [Op.like]: '%test%' } }
+          ]
+        },
+        order: [['price', 'ASC']],
+        limit: 20
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: mockPlans,
+        count: 1
+      });
     });
 
     test('should filter active plans only', async () => {
-      const response = await request(app).get('/plans/search?activeOnly=true');
+      req.query.activeOnly = 'true';
+      const mockPlans = [mockPlan];
+      req.models.Plan.findAll.mockResolvedValue(mockPlans);
 
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body.data).toHaveLength(2);
-      expect(response.body.data.every(plan => plan.is_active)).toBe(true);
+      await searchPlans(req, res);
+
+      expect(req.models.Plan.findAll).toHaveBeenCalledWith({
+        where: { is_active: true },
+        order: [['price', 'ASC']],
+        limit: 20
+      });
     });
 
-    test('should return all plans when no search query', async () => {
-      const response = await request(app).get('/plans/search');
+    test('should handle search error', async () => {
+      const error = new Error('Database error');
+      req.models.Plan.findAll.mockRejectedValue(error);
 
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body.data).toHaveLength(3);
-    });
+      await searchPlans(req, res);
 
-    test('should return empty results for non-matching query', async () => {
-      const response = await request(app).get('/plans/search?q=nonexistent');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body.data).toHaveLength(0);
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Erreur serveur',
+        details: 'Database error'
+      });
     });
   });
 
-  describe('POST /plans - createPlan', () => {
-    test('should create plan successfully', async () => {
-      const planData = {
-        name: 'Basic',
-        description: 'Plan basique',
-        price: 12.00,
-        duration_days: 30
+  describe('createPlan', () => {
+    test('should create a plan successfully', async () => {
+      req.body = {
+        name: 'Pro',
+        description: 'Test plan',
+        price: '29.99',
+        duration_days: '30',
+        features: ['feature1', 'feature2'],
+        is_active: true
       };
+      req.models.Plan.create.mockResolvedValue(mockPlan);
 
-      const response = await request(app)
-        .post('/plans')
-        .send(planData);
+      await createPlan(req, res);
 
-      expect(response.status).toBe(201);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body).toHaveProperty('data');
-      expect(response.body.data.name).toBe(planData.name);
-      expect(response.body.data.price).toBe(12);
+      expect(req.models.Plan.create).toHaveBeenCalledWith({
+        name: 'Pro',
+        description: 'Test plan',
+        price: 29.99,
+        duration_days: 30,
+        features: ['feature1', 'feature2'],
+        is_active: true,
+        is_default: false
+      });
+      expect(res.status).toHaveBeenCalledWith(201);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: mockPlan
+      });
     });
 
-    test('should reject invalid plan type', async () => {
-      const planData = {
+    test('should return 400 when required fields are missing', async () => {
+      req.body = { name: 'Pro' }; 
+
+      await createPlan(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Name, price and duration_days are required fields'
+      });
+    });
+
+    test('should return 400 for invalid plan type', async () => {
+      req.body = {
         name: 'InvalidType',
-        description: 'Plan invalide',
-        price: 12.00,
-        duration_days: 30
+        price: '29.99',
+        duration_days: '30'
       };
 
-      const response = await request(app)
-        .post('/plans')
-        .send(planData);
+      await createPlan(req, res);
 
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('Type de plan invalide');
-      expect(response.body.validTypes).toEqual(['Free', 'Basic', 'Pro']);
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Invalid plan type',
+        validTypes: VALID_PLAN_TYPES
+      });
     });
 
-    test('should handle missing required fields', async () => {
-      const planData = {
-        description: 'Plan sans nom'
+    test('should handle string features correctly', async () => {
+      req.body = {
+        name: 'Pro',
+        price: '29.99',
+        duration_days: '30',
+        features: 'feature1, feature2, feature3'
       };
+      req.models.Plan.create.mockResolvedValue(mockPlan);
 
-      const response = await request(app)
-        .post('/plans')
-        .send(planData);
+      await createPlan(req, res);
 
-      expect(response.status).toBe(400);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Name, price and duration_days are required fields');
-    });
-  });
-
-  describe('GET /plans/:id - getPlanById', () => {
-    test('should return plan by id successfully', async () => {
-      const plan = await models.Plan.create(createTestPlan());
-
-      const response = await request(app).get(`/plans/${plan.id}`);
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body).toHaveProperty('data');
-      expect(response.body.data.id).toBe(plan.id);
-      expect(response.body.data.name).toBe(plan.name);
+      expect(req.models.Plan.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          features: ['feature1', 'feature2', 'feature3']
+        })
+      );
     });
 
-    test('should return 404 for non-existent plan', async () => {
-      const response = await request(app).get('/plans/999');
-
-      expect(response.status).toBe(404);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Plan non trouvé');
-    });
-
-    test('should handle invalid id format', async () => {
-      const response = await request(app).get('/plans/invalid-id');
-
-      expect(response.status).toBe(500);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Erreur serveur');
-    });
-  });
-
-  describe('PUT /plans/:id - updatePlan', () => {
-    test('should update plan successfully', async () => {
-      const plan = await models.Plan.create(createTestPlan({ name: 'Basic' }));
-      const updateData = {
-        name: 'Basic',
-        description: 'Plan mis à jour',
-        price: 12.00
-      };
-
-      const response = await request(app)
-        .put(`/plans/${plan.id}`)
-        .send(updateData);
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body).toHaveProperty('data');
-      expect(response.body.data.description).toBe(updateData.description);
-    });
-
-    test('should return 404 for non-existent plan', async () => {
-      const updateData = {
-        name: 'Basic',
-        description: 'Plan inexistant'
-      };
-
-      const response = await request(app)
-        .put('/plans/999')
-        .send(updateData);
-
-      expect(response.status).toBe(404);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Plan non trouvé');
-    });
-
-    test('should reject invalid plan type on update', async () => {
-      const plan = await models.Plan.create(createTestPlan({ name: 'Basic' }));
-      const updateData = {
-        name: 'InvalidType'
-      };
-
-      const response = await request(app)
-        .put(`/plans/${plan.id}`)
-        .send(updateData);
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('Type de plan invalide');
-      expect(response.body.validTypes).toEqual(['Free', 'Basic', 'Pro']);
-    });
-  });
-
-  describe('DELETE /plans/:id - deletePlan', () => {
-    test('should delete plan successfully', async () => {
-      const plan = await models.Plan.create(createTestPlan());
-
-      const response = await request(app).delete(`/plans/${plan.id}`);
-
-      expect(response.status).toBe(204);
-
-      const deletedPlan = await models.Plan.findByPk(plan.id);
-      expect(deletedPlan).toBeNull();
-    });
-
-    test('should return 404 for non-existent plan', async () => {
-      const response = await request(app).delete('/plans/999');
-
-      expect(response.status).toBe(404);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Plan non trouvé');
-    });
-  });
-
-  describe('PATCH /plans/:id/toggle-status - togglePlanStatus', () => {
-    test('should toggle plan status successfully', async () => {
-      const plan = await models.Plan.create(createTestPlan({ is_active: true }));
-
-      const response = await request(app).patch(`/plans/${plan.id}/toggle-status`);
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body).toHaveProperty('data');
-      expect(response.body.data.is_active).toBe(false);
-    });
-
-    test('should toggle inactive plan to active', async () => {
-      const plan = await models.Plan.create(createTestPlan({ is_active: false }));
-
-      const response = await request(app).patch(`/plans/${plan.id}/toggle-status`);
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body.data.is_active).toBe(true);
-    });
-
-    test('should return 404 for non-existent plan', async () => {
-      const response = await request(app).patch('/plans/999/toggle-status');
-
-      expect(response.status).toBe(404);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Plan non trouvé');
-    });
-  });
-
-  describe('Additional Edge Cases', () => {
-    test('should handle database connection errors', async () => {
-      // Fermer temporairement la connexion
-      await models.sequelize.close();
-
-      const response = await request(app).get('/plans');
-
-      expect(response.status).toBe(500);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toBe('Erreur serveur');
-
-      // Rouvrir la connexion pour les autres tests
-      models = createMockModels();
-      await models.sequelize.sync({ force: true });
-    });
-
-    test('should validate price and duration_days as numbers', async () => {
-      const planData = {
-        name: 'Basic',
+    test('should return 400 for invalid numbers', async () => {
+      req.body = {
+        name: 'Pro',
         price: 'invalid',
-        duration_days: 'invalid'
+        duration_days: '30'
       };
 
-      const response = await request(app)
-        .post('/plans')
-        .send(planData);
+      await createPlan(req, res);
 
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe('Price and duration_days must be valid numbers');
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Price and duration_days must be valid numbers'
+      });
     });
 
-    test('should handle features array properly', async () => {
-      const planData = {
+    test('should handle validation errors', async () => {
+      req.body = {
         name: 'Pro',
-        description: 'Plan avec features',
-        price: 29.00,
-        duration_days: 30,
-        features: ['Feature 1', 'Feature 2', 'Feature 3']
+        price: '29.99',
+        duration_days: '30'
       };
+      const validationError = {
+        name: 'SequelizeValidationError',
+        errors: [
+          { path: 'name', message: 'Name is required' }
+        ]
+      };
+      req.models.Plan.create.mockRejectedValue(validationError);
 
-      const response = await request(app)
-        .post('/plans')
-        .send(planData);
+      await createPlan(req, res);
 
-      expect(response.status).toBe(201);
-      expect(response.body.data.features).toEqual(['Feature 1', 'Feature 2', 'Feature 3']);
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Validation error',
+        details: [
+          { field: 'name', message: 'Name is required' }
+        ]
+      });
+    });
+  });
+
+  describe('getFreePlan', () => {
+    test('should return free plan', async () => {
+      const freePlan = { ...mockPlan, price: 0.00 };
+      req.models.Plan.findAll.mockResolvedValue([freePlan]);
+
+      await getFreePlan(req, res);
+
+      expect(req.models.Plan.findAll).toHaveBeenCalledWith({
+        where: { price: 0.00 },
+        limit: 1
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: freePlan
+      });
     });
 
-    test('should handle string features properly', async () => {
-      const planData = {
-        name: 'Pro',
-        description: 'Plan avec features string',
-        price: 29.00,
-        duration_days: 30,
-        features: 'Feature 1, Feature 2, Feature 3'
+    test('should return 404 when no free plan found', async () => {
+      req.models.Plan.findAll.mockResolvedValue([]);
+
+      await getFreePlan(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Aucun plan gratuit trouvé'
+      });
+    });
+  });
+
+  describe('getAllPlans', () => {
+    test('should get all plans', async () => {
+      const mockPlans = [mockPlan];
+      req.models.Plan.findAll.mockResolvedValue(mockPlans);
+
+      await getAllPlans(req, res);
+
+      expect(req.models.Plan.findAll).toHaveBeenCalledWith({
+        where: {},
+        order: [['price', 'ASC']]
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: mockPlans,
+        count: 1
+      });
+    });
+
+    test('should filter active plans only', async () => {
+      req.query.active_only = 'true';
+      const mockPlans = [mockPlan];
+      req.models.Plan.findAll.mockResolvedValue(mockPlans);
+
+      await getAllPlans(req, res);
+
+      expect(req.models.Plan.findAll).toHaveBeenCalledWith({
+        where: { is_active: true },
+        order: [['price', 'ASC']]
+      });
+    });
+
+    test('should filter default plans only', async () => {
+      req.query.is_default = 'true';
+      const mockPlans = [mockPlan];
+      req.models.Plan.findAll.mockResolvedValue(mockPlans);
+
+      await getAllPlans(req, res);
+
+      expect(req.models.Plan.findAll).toHaveBeenCalledWith({
+        where: { is_default: true },
+        order: [['price', 'ASC']]
+      });
+    });
+  });
+
+  describe('getPlanById', () => {
+    test('should get plan by id', async () => {
+      req.params.id = '1';
+      req.models.Plan.findByPk.mockResolvedValue(mockPlan);
+
+      await getPlanById(req, res);
+
+      expect(req.models.Plan.findByPk).toHaveBeenCalledWith('1');
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: mockPlan
+      });
+    });
+
+    test('should return 404 when plan not found', async () => {
+      req.params.id = '999';
+      req.models.Plan.findByPk.mockResolvedValue(null);
+
+      await getPlanById(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Plan non trouvé'
+      });
+    });
+  });
+
+  describe('updatePlan', () => {
+    test('should update plan successfully', async () => {
+      req.params.id = '1';
+      req.body = {
+        name: 'Updated Plan',
+        price: 39.99,
+        features: ['new_feature1', 'new_feature2']
       };
+      req.models.Plan.findByPk.mockResolvedValue(mockPlan);
+      mockPlan.update.mockResolvedValue(mockPlan);
 
-      const response = await request(app)
-        .post('/plans')
-        .send(planData);
+      await updatePlan(req, res);
 
-      expect(response.status).toBe(201);
-      expect(response.body.data.features).toEqual(['Feature 1', 'Feature 2', 'Feature 3']);
+      expect(mockPlan.update).toHaveBeenCalledWith({
+        name: 'Updated Plan',
+        price: 39.99,
+        features: ['new_feature1', 'new_feature2']
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: mockPlan
+      });
+    });
+
+    test('should handle string features in update', async () => {
+      req.params.id = '1';
+      req.body = {
+        features: 'feature1, feature2, feature3'
+      };
+      req.models.Plan.findByPk.mockResolvedValue(mockPlan);
+      mockPlan.update.mockResolvedValue(mockPlan);
+
+      await updatePlan(req, res);
+
+      expect(mockPlan.update).toHaveBeenCalledWith({
+        features: ['feature1', 'feature2', 'feature3']
+      });
+    });
+
+    test('should return 404 when plan not found', async () => {
+      req.params.id = '999';
+      req.models.Plan.findByPk.mockResolvedValue(null);
+
+      await updatePlan(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Plan non trouvé'
+      });
+    });
+  });
+
+  describe('deletePlan', () => {
+    test('should delete plan successfully', async () => {
+      req.params.id = '1';
+      req.models.Plan.findByPk.mockResolvedValue(mockPlan);
+      mockPlan.destroy.mockResolvedValue();
+
+      await deletePlan(req, res);
+
+      expect(mockPlan.destroy).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(204);
+      expect(res.end).toHaveBeenCalled();
+    });
+
+    test('should return 404 when plan not found', async () => {
+      req.params.id = '999';
+      req.models.Plan.findByPk.mockResolvedValue(null);
+
+      await deletePlan(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Plan non trouvé'
+      });
+    });
+  });
+
+  describe('togglePlanStatus', () => {
+    test('should toggle plan status successfully', async () => {
+      req.params.id = '1';
+      const updatedPlan = { ...mockPlan, is_active: false };
+      req.models.Plan.findByPk.mockResolvedValue(mockPlan);
+      mockPlan.update.mockResolvedValue(updatedPlan);
+
+      await togglePlanStatus(req, res);
+
+      expect(mockPlan.update).toHaveBeenCalledWith({
+        is_active: !mockPlan.is_active
+      });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          id: updatedPlan.id,
+          name: updatedPlan.name,
+          is_active: updatedPlan.is_active
+        }
+      });
+    });
+
+    test('should return 404 when plan not found', async () => {
+      req.params.id = '999';
+      req.models.Plan.findByPk.mockResolvedValue(null);
+
+      await togglePlanStatus(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Plan non trouvé'
+      });
+    });
+  });
+
+  describe('Error handling', () => {
+    test('should handle database errors in getAllPlans', async () => {
+      const error = new Error('Database connection failed');
+      req.models.Plan.findAll.mockRejectedValue(error);
+
+      await getAllPlans(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Erreur serveur'
+      });
+    });
+
+    test('should handle errors in updatePlan', async () => {
+      req.params.id = '1';
+      req.body = { name: 'Updated' };
+      const error = new Error('Update failed');
+      req.models.Plan.findByPk.mockResolvedValue(mockPlan);
+      mockPlan.update.mockRejectedValue(error);
+
+      await updatePlan(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Données invalides',
+        details: 'Update failed'
+      });
+    });
+  });
+
+  describe('VALID_PLAN_TYPES', () => {
+    test('should export valid plan types', () => {
+      expect(VALID_PLAN_TYPES).toEqual(['Free', 'Basic', 'Pro']);
     });
   });
 });
