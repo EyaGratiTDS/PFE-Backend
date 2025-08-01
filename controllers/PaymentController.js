@@ -129,7 +129,6 @@ const paymentController = {
 
     } catch (error) {
       if (transaction) await transaction.rollback();
-      console.error('Erreur:', error);
       res.status(500).json({
         success: false,
         error: process.env.NODE_ENV === 'development' ? error.message : 'Erreur serveur'
@@ -257,7 +256,6 @@ const paymentController = {
 
       return res.json(createResponse(true));
     } catch (err) {
-      console.error('Webhook signature verification failed:', err);
       return res.status(400).json(createResponse(false, {}, `Webhook Error: ${err.message}`));
     }
   },

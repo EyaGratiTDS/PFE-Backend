@@ -37,7 +37,6 @@ const deleteFileIfExists = (filePath) => {
   if (fs.existsSync(absolutePath)) {
     try {
       fs.unlinkSync(absolutePath);
-      console.log(`Fichier supprimé: ${absolutePath}`);
     } catch (error) {
       console.error(`Erreur lors de la suppression du fichier ${absolutePath}:`, error);
     }
@@ -88,7 +87,6 @@ const signUp = async (req, res) => {
       message: 'User registered successfully. Please check your email.' 
     });
   } catch (error) {
-    console.error('Signup error:', error);
     res.status(500).json({ error: 'Registration failed' });
   }
 };
@@ -374,7 +372,6 @@ const getCurrentUser = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get current user error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve user information'
@@ -808,7 +805,6 @@ const getAllUsers = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get all users error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to retrieve users',

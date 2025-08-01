@@ -49,8 +49,6 @@ const createVCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error creating vCard:", error);
-
     if (error.name === "SequelizeValidationError") {
       const errors = error.errors.map(err => ({
         field: err.path,

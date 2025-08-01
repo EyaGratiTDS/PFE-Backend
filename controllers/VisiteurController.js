@@ -17,7 +17,9 @@ const fetchWithFallback = async (urls, options) => {
       const response = await axios.get(url, options);
       return url.includes('ipify') ? response.data.ip : response.data.trim();
     } catch (error) {
-      console.error(`API request failed for ${url}:`, error.message);
+      if (process.env.NODE_ENV !== 'test') {
+        console.error(`API request failed for ${url}:`, error.message)
+      };
     }
   }
   return null;
@@ -61,7 +63,6 @@ const getLocationData = async (ip) => {
       ip
     };
   } catch (error) {
-    console.error('Geolocation API error:', error.message);
     return { country: 'Unknown', city: 'Unknown', ip };
   }
 };
@@ -133,7 +134,6 @@ exports.trackVisitor = async (req, res) => {
 
     res.json({ visitorId: visitor.id });
   } catch (error) {
-    console.error('Tracking error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -159,7 +159,6 @@ exports.trackVisitorExit = async (req, res) => {
     
     res.json({ success: true });
   } catch (error) {
-    console.error('Exit tracking error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -195,7 +194,6 @@ exports.getAudienceStats = async (req, res) => {
       avgDuration: avgDuration?.avgDuration || 0
     });
   } catch (error) {
-    console.error('Stats error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -233,7 +231,6 @@ exports.getVisitorDetails = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Visitor details error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

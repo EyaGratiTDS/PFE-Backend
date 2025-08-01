@@ -26,7 +26,6 @@ const normalizeScopes = scopes => (scopes?.length ? [].concat(scopes) : ['*']);
 
 const handleResponse = (res, status, data) => res.status(status).json({ success: status < 400, ...data });
 const handleError = (res, context, error) => {
-  console.error(`${context} error:`, error);
   return handleResponse(res, 500, {
     message: `Failed to ${context}`,
     error: process.env.NODE_ENV === 'development' ? error.message : undefined

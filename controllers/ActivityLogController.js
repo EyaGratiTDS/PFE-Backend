@@ -117,7 +117,6 @@ const buildWhereClause = (userId, query) => {
 const handleActivityResponse = (res, data) => res.json({ success: true, ...data });
 
 const handleActivityError = (res, context) => (error) => {
-  console.error(`Activity error (${context}):`, error);
   res.status(500).json({ success: false, message: 'Internal server error' });
 };
 

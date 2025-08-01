@@ -152,7 +152,6 @@ const createPixel = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Pixel creation error:", error);
     res.status(500).json({
       success: false,
       message: "Server error"
@@ -414,7 +413,6 @@ const trackEvent = async (req, res) => {
     sendPixelResponse(res);
 
   } catch (error) {
-    console.error("Event tracking error:", error);
     sendPixelResponse(res);
   }
 };

@@ -42,7 +42,6 @@ const searchPlans = async (req, res) => {
       count: plans.length
     });
   } catch (error) {
-    console.error('Erreur recherche plans:', error);
     res.status(500).json({ 
       success: false,
       error: 'Erreur serveur',
@@ -104,9 +103,7 @@ const createPlan = async (req, res) => {
       success: true,
       data: plan
     });
-  } catch (error) {
-    console.error('Erreur création plan:', error);
-    
+  } catch (error) {    
     if (error.name === 'SequelizeValidationError') {
       return res.status(400).json({
         success: false,
@@ -177,7 +174,6 @@ const getAllPlans = async (req, res) => {
       count: plans.length
     });
   } catch (error) {
-    console.error('Erreur récupération plans:', error);
     res.status(500).json({
       success: false,
       error: 'Erreur serveur'
@@ -236,7 +232,6 @@ const updatePlan = async (req, res) => {
       data: plan
     });
   } catch (error) {
-    console.error('Erreur mise à jour plan:', error);
     res.status(400).json({
       success: false,
       error: 'Données invalides',

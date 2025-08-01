@@ -29,7 +29,6 @@ const requireAuth = async (req, res, next) => {
     
     next();
   } catch (error) {
-    console.error('Erreur d\'authentification:', error);
     return res.status(401).json({ message: 'Session invalide ou expirée' });
   }
 };
@@ -70,7 +69,6 @@ const requireAuthSuperAdmin = async (req, res, next) => {
     
     next();
   } catch (error) {
-    console.error('Erreur d\'authentification SuperAdmin:', error);
     return res.status(401).json({ message: 'Session invalide ou expirée' });
   }
 };

@@ -47,7 +47,6 @@ const handleOperation = async (res, operation, context) => {
     const result = await operation();
     res.json({ success: true, ...result });
   } catch (error) {
-    console.error(`${context} error:`, error);
     res.status(500).json({
       success: false,
       error: error.message,

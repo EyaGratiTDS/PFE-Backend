@@ -2,7 +2,13 @@ const sgMail = require('@sendgrid/mail');
 require('dotenv').config(); 
 
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+if (process.env.NODE_ENV !== 'test' && process.env.SENDGRID_API_KEY) {
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+} else if (process.env.NODE_ENV === 'test') {
+    sgMail.send = async () => {
+        return { statusCode: 202 };
+    };
+}
 
 const sendVerificationEmail = async (email, name, verificationLink) => {
   const msg = {

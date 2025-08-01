@@ -34,7 +34,6 @@ router.post('/forgot-password', async (req, res) => {
 
     res.status(200).json();
   } catch (error) {
-    console.error('Error during forgot password process:', error);
     res.status(500).json({ message: 'An error occurred. Please try again.' });
   }
 });
@@ -57,7 +56,7 @@ router.post('/forgot-password', async (req, res) => {
         return res.status(400).json({ message: "Invalid or expired token." });
       }
   
-      user = rows[0]; // Utiliser directement les données de la DB au lieu du constructeur User
+      user = rows[0]; 
   
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(newPassword, salt);
@@ -69,7 +68,9 @@ router.post('/forgot-password', async (req, res) => {
       try {
         await notificationController.sendPasswordChangeNotification(user.id);
       } catch (notificationError) {
-        console.error('Failed to send password change notification:', notificationError);
+        if (process.env.NODE_ENV !== 'test') {
+          console.error('Failed to send password change notification:', notificationError);
+        }
       }
       await ActivityLogController.logActivity(user.id, 'password_reset_success', req);
       res.status(200).json({ message: "Your password has been reset successfully." });
@@ -77,7 +78,6 @@ router.post('/forgot-password', async (req, res) => {
       if (user && user.id) {
         await ActivityLogController.logActivity(user.id, 'password_reset_failed', req);
       }
-      console.error("Error resetting password:", error);
       res.status(500).json({ message: "An error occurred. Please try again." });
     }
   });
