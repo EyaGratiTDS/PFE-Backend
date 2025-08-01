@@ -3,30 +3,24 @@ const express = require('express');
 
 describe('Auth Routes Integration Tests', () => {
   let app;
-  let consoleSpy;
+  let consoleErrorSpy;
   let mockPassport;
 
   beforeAll(() => {
-    // Mock console.error pour les tests
-    consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    
-    // Variables d'environnement pour les tests
-    process.env.FRONTEND_URL = 'http://localhost:3000';
+    process.env.FRONTEND_URL = 'http://localhost:5173';
   });
 
   beforeEach(() => {
-    // Créer un mock passport frais pour chaque test
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    
     mockPassport = {
       authenticate: jest.fn()
     };
 
-    // Créer une nouvelle instance d'Express pour chaque test
     app = express();
     
-    // Créer les routes directement dans le test
     const router = express.Router();
 
-    // Route GET /google - le mock sera configuré dans chaque test
     router.get('/google', (req, res, next) => {
       const middleware = mockPassport.authenticate('google', {
         scope: ['profile', 'email'],
@@ -35,7 +29,6 @@ describe('Auth Routes Integration Tests', () => {
       middleware(req, res, next);
     });
 
-    // Route GET /google/callback - le mock sera configuré dans chaque test
     router.get('/google/callback', (req, res, next) => {
       const authMiddleware = mockPassport.authenticate('google', {
         failureRedirect: `${process.env.FRONTEND_URL}/sign-in?error=auth_failed`,
@@ -45,9 +38,8 @@ describe('Auth Routes Integration Tests', () => {
       authMiddleware(req, res, (err) => {
         if (err) return next(err);
         
-        // Handler callback après l'authentification
         try {
-          if (!req.user || !req.user.token) {
+          if (!req.user || !req.user.token || !req.user.user) {
             console.error('Auth callback failed: No user or token');
             return res.redirect(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
           }
@@ -68,17 +60,14 @@ describe('Auth Routes Integration Tests', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
-  });
-
-  afterAll(() => {
-    consoleSpy.mockRestore();
+    if (consoleErrorSpy) {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   describe('GET /auth/google', () => {
     it('should initiate Google OAuth flow', async () => {
-      // Mock passport.authenticate pour simuler la redirection vers Google
       mockPassport.authenticate.mockImplementation((strategy, options) => {
-        // Vérifier que la stratégie et les options sont correctes
         expect(strategy).toBe('google');
         expect(options).toEqual({
           scope: ['profile', 'email'],
@@ -86,7 +75,6 @@ describe('Auth Routes Integration Tests', () => {
         });
         
         return (req, res, next) => {
-          // Simuler la redirection vers Google
           res.redirect('https://accounts.google.com/oauth/authorize?client_id=test&redirect_uri=callback&scope=profile+email');
         };
       });
@@ -134,15 +122,12 @@ describe('Auth Routes Integration Tests', () => {
         }
       };
 
-      // Mock passport.authenticate pour le callback
       mockPassport.authenticate.mockImplementation((strategy, options) => {
-        // Vérifier les options du callback
         expect(strategy).toBe('google');
         expect(options.failureRedirect).toBe(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
         expect(options.session).toBe(false);
         
         return (req, res, next) => {
-          // Simuler un utilisateur authentifié
           req.user = mockUser;
           next();
         };
@@ -166,7 +151,6 @@ describe('Auth Routes Integration Tests', () => {
     it('should handle callback when user is missing', async () => {
       mockPassport.authenticate.mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Pas d'utilisateur dans req.user
           req.user = null;
           next();
         };
@@ -177,16 +161,14 @@ describe('Auth Routes Integration Tests', () => {
         .expect(302);
 
       expect(response.headers.location).toBe(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
-      expect(consoleSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
     });
 
     it('should handle callback when token is missing', async () => {
       mockPassport.authenticate.mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Utilisateur sans token
           req.user = {
             user: { id: 'user123', email: 'test@gmail.com' }
-            // token manquant
           };
           next();
         };
@@ -197,16 +179,14 @@ describe('Auth Routes Integration Tests', () => {
         .expect(302);
 
       expect(response.headers.location).toBe(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
-      expect(consoleSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
     });
 
     it('should handle callback when user object is missing', async () => {
       mockPassport.authenticate.mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Token mais pas d'objet user
           req.user = {
             token: 'jwt_token_12345'
-            // user manquant
           };
           next();
         };
@@ -217,13 +197,12 @@ describe('Auth Routes Integration Tests', () => {
         .expect(302);
 
       expect(response.headers.location).toBe(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
-      expect(consoleSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
     });
 
     it('should handle JSON stringify error', async () => {
       mockPassport.authenticate.mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Créer un objet user avec référence circulaire pour causer une erreur JSON.stringify
           const circularUser = { id: 'user123' };
           circularUser.self = circularUser;
           
@@ -240,13 +219,12 @@ describe('Auth Routes Integration Tests', () => {
         .expect(302);
 
       expect(response.headers.location).toBe(`${process.env.FRONTEND_URL}/sign-in?error=callback_failed`);
-      expect(consoleSpy).toHaveBeenCalledWith('Google callback error:', expect.any(TypeError));
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Google callback error:', expect.any(TypeError));
     });
 
     it('should handle passport authentication failure', async () => {
       mockPassport.authenticate.mockImplementation((strategy, options) => {
         return (req, res, next) => {
-          // Simuler un échec d'authentification - passport redirige automatiquement
           res.redirect(options.failureRedirect);
         };
       });
@@ -282,12 +260,10 @@ describe('Auth Routes Integration Tests', () => {
 
       const location = response.headers.location;
       
-      // Vérifier que les caractères spéciaux sont correctement encodés
       expect(location).toContain('token=jwt%2Btoken%2Fwith%3Dspecial%26chars');
       expect(location).toContain('auth=success');
       expect(location).toContain('user=');
       
-      // Décoder et vérifier les données utilisateur
       const urlParams = new URLSearchParams(location.split('?')[1]);
       const decodedUser = JSON.parse(decodeURIComponent(urlParams.get('user')));
       
@@ -301,17 +277,15 @@ describe('Auth Routes Integration Tests', () => {
       const originalUrl = process.env.FRONTEND_URL;
       process.env.FRONTEND_URL = 'https://myapp.com';
 
-      // Créer un nouveau mock passport
       const newMockPassport = {
         authenticate: jest.fn(() => {
           return (req, res, next) => {
-            req.user = null; // Forcer l'échec
+            req.user = null; 
             next();
           };
         })
       };
 
-      // Recréer l'app avec la nouvelle URL
       app = express();
       const router = express.Router();
 
@@ -325,7 +299,7 @@ describe('Auth Routes Integration Tests', () => {
           if (err) return next(err);
           
           try {
-            if (!req.user || !req.user.token) {
+            if (!req.user || !req.user.token || !req.user.user) {
               return res.redirect(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
             }
             
@@ -347,7 +321,6 @@ describe('Auth Routes Integration Tests', () => {
 
       expect(response.headers.location).toBe('https://myapp.com/sign-in?error=auth_failed');
 
-      // Restaurer l'URL originale
       process.env.FRONTEND_URL = originalUrl;
     });
   });
@@ -395,6 +368,7 @@ describe('Auth Routes Integration Tests', () => {
         .expect(302);
 
       expect(response.headers.location).toBe(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
     });
 
     it('should handle empty token', async () => {
@@ -413,6 +387,7 @@ describe('Auth Routes Integration Tests', () => {
         .expect(302);
 
       expect(response.headers.location).toBe(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
     });
 
     it('should handle null token', async () => {
@@ -422,6 +397,7 @@ describe('Auth Routes Integration Tests', () => {
             token: null,
             user: { id: 'user123' }
           };
+          next();
         };
       });
 
@@ -430,6 +406,7 @@ describe('Auth Routes Integration Tests', () => {
         .expect(302);
 
       expect(response.headers.location).toBe(`${process.env.FRONTEND_URL}/sign-in?error=auth_failed`);
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Auth callback failed: No user or token');
     });
   });
 
