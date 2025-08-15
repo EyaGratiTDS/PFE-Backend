@@ -20,6 +20,7 @@ const pixelRoutes = require('./routes/pixelRoutes');
 const customDomainRoutes = require('./routes/customDomainRoutes');
 const QuoteRoutes = require('./routes/quoteRoutes');
 const visitorRoutes = require('./routes/visitorRoutes');
+const webNotificationsRoutes = require('./routes/webNotificationRoutes');
 const sequelize = require('./database/sequelize');
 const { requireAuth } = require('./middleware/authMiddleware');
 const path = require("path");
@@ -275,6 +276,7 @@ app.use('/pixel', pixelRoutes);
 app.use('/custom-domain', customDomainRoutes);
 app.use('/quotes', QuoteRoutes);
 app.use('/visitor', visitorRoutes);
+app.use('/web-notifications', webNotificationsRoutes);
 
 app.post('/auth/refresh-token', async (req, res) => {
   try {

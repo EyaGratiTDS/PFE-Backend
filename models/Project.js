@@ -33,6 +33,10 @@ const Project = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },
+    key: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     userId: {
       type: DataTypes.INTEGER,
       allowNull: false,

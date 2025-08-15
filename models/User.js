@@ -107,7 +107,11 @@ const User = sequelize.define('Users', {
   duration: {
     type: DataTypes.INTEGER, 
     allowNull: true
-  }
+  },
+  key: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
 }, {
   timestamps: true,
   tableName: 'users',
@@ -167,6 +171,11 @@ User.associate = function(models) {
   User.hasMany(models.CustomDomain, {
     foreignKey: 'userId',
     as: 'CustomDomain',
+    onDelete: 'CASCADE'
+  });
+  User.hasMany(models.WebNotifications, {
+    foreignKey: 'userId',
+    as: 'WebNotifications',
     onDelete: 'CASCADE'
   });
 };

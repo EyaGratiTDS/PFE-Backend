@@ -74,6 +74,10 @@ const VCard = sequelize.define(
       defaultValue: 0,
       allowNull: true,
     },
+    key: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     userId: {
       type: DataTypes.INTEGER,
       allowNull: false,
