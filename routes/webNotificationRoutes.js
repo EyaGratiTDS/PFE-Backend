@@ -7,8 +7,8 @@ const { sendWebNotification } = require('../controllers/webNotificationsControll
 
 router.post("/", requireAuth, async (req, res) => {
   try {
-    console.log("Received Web Notification Subscription:", req.body);
-    console.log("User from request:", req.user);
+    ///console.log("Received Web Notification Subscription:", req.body);
+    //console.log("User from request:", req.user);
     
     const subscription = req.body;
     const userId = req.user.id; 
