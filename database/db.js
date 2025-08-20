@@ -1,14 +1,19 @@
 const mysql = require('mysql2');
+const fs = require('fs');
+const path = require('path');
 
 const config = {
   host: process.env.HOST,
   user: process.env.USER,
   password: process.env.PASSWORD,
   database: process.env.DATABASE,
-  port: 19456,
+  port: 51744,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  connectTimeout: 120000,   // ⚡ à la racine (pas dans dialectOptions)
+  multipleStatements: true, // ⚡ idem
+  charset: 'utf8mb4',       // ⚡ idem
 };
 
 const connection = mysql.createConnection(config);
@@ -33,14 +38,14 @@ connection.connect((err) => {
     return;
   }
 
-  console.log('Connected to MySQL!');
+  console.log('✅ Connected to MySQL!');
 
   initializeDatabase()
     .then(() => {
-      console.log('Database ready to use.');
+      console.log('✅ Database ready to use.');
     })
     .catch((err) => {
-      console.error('Error during database initialization:', err);
+      console.error('❌ Error during database initialization:', err);
     });
 });
 

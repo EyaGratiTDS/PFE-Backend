@@ -7,26 +7,17 @@ const sequelize = new Sequelize(
   process.env.USER, 
   process.env.PASSWORD, 
   {
-  host: process.env.HOST,
-  dialect: "mysql",
-  port: 19456,
-  logging: false,
-  pool: {
+    host: process.env.HOST,
+    dialect: "mysql",
+    port: 51744,
+    logging: false,
+    pool: {
     max: 5,
     min: 0,
     acquire: 120000,
     idle: 60000,
     evict: 1000,
     handleDisconnects: true
-  },
-  dialectOptions: {
-    connectTimeout: 120000, 
-    multipleStatements: true,
-    charset: 'utf8mb4',
-    ssl: {
-      ca: fs.readFileSync(path.join(__dirname, 'ca.pem')).toString(),
-      rejectUnauthorized: true
-    }
   },
   retry: {
     match: [
