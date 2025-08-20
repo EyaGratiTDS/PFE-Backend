@@ -48,7 +48,7 @@ const clients = new Map(); // userId -> Set(ws)
 // Middleware
 // --------------------
 app.use(cors({
-  origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:5173'],
+  origin: process.env.CORS_ORIGINS?.split(',') || [process.env.FRONTEND_URL],
   methods: 'GET, POST, PUT, DELETE, OPTIONS, PATCH',
   allowedHeaders: 'Content-Type, Authorization, Stripe-Version',
   credentials: true
