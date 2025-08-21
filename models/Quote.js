@@ -33,7 +33,7 @@ const Quote = sequelize.define('Quote', {
     allowNull: true,
   },
 }, {
-  tableName: 'Quotes',
+  tableName: 'quotes',
   timestamps: true,
 });
 
