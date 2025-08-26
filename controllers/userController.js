@@ -701,8 +701,7 @@ const verifyTwoFactorLogin = async (req, res) => {
 
 const getAllUsers = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '' } = req.query;
-    const offset = (page - 1) * limit;
+    const { search = '' } = req.query;
 
     const where = {};
     if (search) {
@@ -712,10 +711,8 @@ const getAllUsers = async (req, res) => {
       ];
     }
 
-    const { count, rows: users } = await User.findAndCountAll({
+    const users = await User.findAll({
       where,
-      limit: parseInt(limit, 10),
-      offset: parseInt(offset, 10),
       attributes: { exclude: ['password', 'twoFactorSecret'] },
       order: [['created_at', 'DESC']],
       include: [
@@ -778,15 +775,10 @@ const getAllUsers = async (req, res) => {
             }
       };
     });
+
     res.json({
       success: true,
-      data: formattedUsers,
-      pagination: {
-        totalItems: count,
-        totalPages: Math.ceil(count / limit),
-        currentPage: parseInt(page, 10),
-        pageSize: parseInt(limit, 10)
-      }
+      data: formattedUsers
     });
   } catch (error) {
     res.status(500).json({ 
