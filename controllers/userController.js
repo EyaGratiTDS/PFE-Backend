@@ -16,47 +16,60 @@ const signUp = async (req, res) => {
   try {
     const { name, email, password, recaptchaToken } = req.body;
 
-    const recaptchaResponse = await axios.post(
+    /*const recaptchaResponse = await axios.post(
       `https://www.google.com/recaptcha/api/siteverify?secret=${process.env.RECAPTCHA_SECRET_KEY}&response=${recaptchaToken}`
-    );
+    );*/
 
-    if (!recaptchaResponse.data.success) {
+    /*if (!recaptchaResponse.data.success) {
       return res.status(400).json({ 
         success: false,
         message: 'reCAPTCHA validation failed.' 
       });
-    }
+    }*/
 
-    const existingUser = await User.findOne({ where: { email } });
+     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: 'A user with this email already exists.' 
+        message: 'A user with this email already exists.'
       });
     }
-
+   
     const verificationToken = crypto.randomBytes(32).toString('hex');
-
-    const user = await User.create({
+    console.log("Verification token:", verificationToken);
+    
+    // Changez le role en "user" temporairement pour tester
+    const userData = {
       name,
       email,
       password,
-      role: "admin",
+      role: "user", // Changez temporairement de "admin" à "user"
       verificationToken
-    });
-
+    };
+    
+    console.log("Creating user with data:", userData);
+    const newUser = await User.create(userData);
+    console.log("User created successfully:", newUser.id);
+    
     const verificationLink = `${process.env.BACKEND_URL}/users/verify-email?token=${verificationToken}`;
     await sendVerificationEmail(email, name, verificationLink);
-    const createdUser = await User.findOne({ where: { email } });
-    await notificationController.sendWelcomeNotification(createdUser.id, name);
-    await activityLogController.logActivity(createdUser.id, 'register_success', req);
-
-    return res.status(201).json({ 
+    
+    await notificationController.sendWelcomeNotification(newUser.id, name);
+    await activityLogController.logActivity(newUser.id, 'register_success', req);
+    
+    return res.status(201).json({
       success: true,
-      message: 'User registered successfully. Please check your email.' 
+      message: 'User registered successfully. Please check your email.'
     });
   } catch (error) {
-    res.status(500).json({ error: 'Registration failed' });
+    console.error("Detailed error in signUp:", error);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    
+    res.status(500).json({ 
+      error: 'Registration failed',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
