@@ -16,16 +16,16 @@ const signUp = async (req, res) => {
   try {
     const { name, email, password, recaptchaToken } = req.body;
 
-    /*const recaptchaResponse = await axios.post(
+    const recaptchaResponse = await axios.post(
       `https://www.google.com/recaptcha/api/siteverify?secret=${process.env.RECAPTCHA_SECRET_KEY}&response=${recaptchaToken}`
-    );*/
+    );
 
-    /*if (!recaptchaResponse.data.success) {
+    if (!recaptchaResponse.data.success) {
       return res.status(400).json({ 
         success: false,
         message: 'reCAPTCHA validation failed.' 
       });
-    }*/
+    }
 
      const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
@@ -43,7 +43,7 @@ const signUp = async (req, res) => {
       name,
       email,
       password,
-      role: "user", // Changez temporairement de "admin" à "user"
+      role: "admin", // Changez temporairement de "admin" à "user"
       verificationToken
     };
     
