@@ -1,7 +1,6 @@
 const VCard = require("../models/Vcard");
 const User = require("../models/User");
-const { upload, deleteFileIfExists } = require('../services/uploadService');
-const path = require("path");
+const { deleteFileIfExists } = require("../services/cloudinary");const path = require("path");
 const fs = require('fs');
 const { generateUniqueUrl } = require("../services/generateUrl");
 const { Op } = require('sequelize');
@@ -172,40 +171,39 @@ const updateVCard = async (req, res) => {
       projectId: projectId || null
     };
 
-    if (backgroundFile) {
-      vcardData.background_value = `/uploads/${backgroundFile.filename}`;
-
-      if (currentVCard.background_type === 'custom-image' && currentVCard.background_value) {
-        deleteFileIfExists(currentVCard.background_value);
-      }
-    } else {
-      vcardData.background_value = background_value || currentVCard.background_value;
-    }
-
     if (logoFile) {
-      vcardData.logo = `/uploads/${logoFile.filename}`;
-
-      if (currentVCard.logo) {
-        deleteFileIfExists(currentVCard.logo);
+      if (currentVCard.logoPublicId) {
+        await deleteFileIfExists(currentVCard.logoPublicId);
       }
+      vcardData.logo = logoFile.path;         // URL renvoyée par Cloudinary
+      vcardData.logoPublicId = logoFile.filename; // ID public
     } else {
       vcardData.logo = currentVCard.logo;
+      vcardData.logoPublicId = currentVCard.logoPublicId;
     }
 
+    // 📌 FAVICON
     if (faviconFile) {
-      vcardData.favicon = `/uploads/${faviconFile.filename}`;
-
-      if (currentVCard.favicon && currentVCard.favicon.startsWith('/uploads/')) {
-        deleteFileIfExists(currentVCard.favicon);
+      if (currentVCard.faviconPublicId) {
+        await deleteFileIfExists(currentVCard.faviconPublicId);
       }
-    } else if (favicon) {
-      vcardData.favicon = favicon;
-
-      if (currentVCard.favicon && currentVCard.favicon.startsWith('/uploads/')) {
-        deleteFileIfExists(currentVCard.favicon);
-      }
+      vcardData.favicon = faviconFile.path;
+      vcardData.faviconPublicId = faviconFile.filename;
     } else {
       vcardData.favicon = currentVCard.favicon;
+      vcardData.faviconPublicId = currentVCard.faviconPublicId;
+    }
+
+    // 📌 BACKGROUND
+    if (backgroundFile) {
+      if (currentVCard.backgroundPublicId) {
+        await deleteFileIfExists(currentVCard.backgroundPublicId);
+      }
+      vcardData.background_value = backgroundFile.path;
+      vcardData.backgroundPublicId = backgroundFile.filename;
+    } else {
+      vcardData.background_value = background_value || currentVCard.background_value;
+      vcardData.backgroundPublicId = currentVCard.backgroundPublicId;
     }
 
     const [updated] = await VCard.update(vcardData, {
@@ -231,9 +229,9 @@ const deleteVCard = async (req, res) => {
       return res.status(404).json({ message: "VCard not found" });
     }
 
-    if (vcard.logo) deleteFileIfExists(vcard.logo);
-    if (vcard.favicon && vcard.favicon.startsWith('/uploads/')) deleteFileIfExists(vcard.favicon);
-    if (vcard.background_type === 'image' && vcard.background_value) deleteFileIfExists(vcard.background_value);
+    if (vcard.logoPublicId) await deleteFileIfExists(vcard.logoPublicId);
+    if (vcard.faviconPublicId) await deleteFileIfExists(vcard.faviconPublicId);
+    if (vcard.backgroundPublicId) await deleteFileIfExists(vcard.backgroundPublicId);
 
     await VCard.destroy({
       where: { id: req.params.id },
@@ -273,6 +271,7 @@ const getVCardByUrl = async (req, res) => {
         isNotActive: true
       });
     }
+
     const vcardIndex = await VCard.count({
       where: {
         userId: vcard.userId,
@@ -302,27 +301,30 @@ const getVCardByUrl = async (req, res) => {
       );
       const match = vcardFeature?.match(/\d+/);
       maxAllowed = match ? parseInt(match[0]) : 1;
+
       const blocksFeature = plan.features.find(f => 
         f.toLowerCase().includes('vcard blocks')
       );
       const blocksMatch = blocksFeature?.match(/\d+/);
       maxBlocksAllowed = blocksMatch ? parseInt(blocksMatch[0]) : 10;
     }
+
     const isAllowed = maxAllowed === Infinity || vcardIndex <= maxAllowed;
     if (!isAllowed) {
       return res.status(404).end();
     }
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    // ✅ On supprime baseUrl, on renvoie directement les URL Cloudinary stockées
     const response = {
       ...vcard.get({ plain: true }),
-      logo: vcard.logo ? `${baseUrl}${vcard.logo}` : null,
-      favicon: vcard.favicon ? `${baseUrl}${vcard.favicon}` : null,
+      logo: vcard.logo || null,
+      favicon: vcard.favicon || null,
       background_value: vcard.background_type === 'custom-image'
-        ? `${baseUrl}${vcard.background_value}`
+        ? vcard.background_value
         : vcard.background_value,
       maxBlocksAllowed: maxBlocksAllowed
     };
+
     res.json(response);
 
   } catch (error) {
@@ -330,6 +332,7 @@ const getVCardByUrl = async (req, res) => {
     res.status(500).end();
   }
 };
+
 
 const getAllVCardsWithUsers = async (req, res) => {
   try {

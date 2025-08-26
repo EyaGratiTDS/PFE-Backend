@@ -11,12 +11,10 @@ const requireAuth = async (req, res, next) => {
     }
     const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
 
-    
-    const user = await User.findByPk(decodedToken.id);
+    const user = await User.findById(decodedToken.id);
     if (!user) {
       return res.status(401).json({ message: 'Utilisateur non trouvé' });
     }
-
     req.authInfo = {
       userId: user.id,
       isAdmin: user.isAdmin,

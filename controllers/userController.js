@@ -2,9 +2,6 @@ const { Op } = require('sequelize');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const multer = require("multer");
-const path = require("path");
-const fs = require('fs');
 const { sendVerificationEmail, sendAccountCreationEmail } = require('../services/emailService');
 const axios = require('axios');
 const speakeasy = require('speakeasy');
@@ -12,36 +9,8 @@ const QRCode = require('qrcode');
 const db = require('../models');
 const activityLogController = require('../controllers/ActivityLogController');
 const notificationController = require('../controllers/NotificationController');
+const { upload, deleteFileIfExists } = require('../services/cloudinary');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
-});
-
-const upload = multer({ storage });
-
-const deleteFileIfExists = (filePath) => {
-  if (!filePath) return;
-  
-  const normalizedPath = filePath.startsWith('/uploads/') 
-    ? filePath.substring(9) 
-    : filePath;
-  
-  const absolutePath = path.join(__dirname, '../uploads', normalizedPath);
-  
-  if (fs.existsSync(absolutePath)) {
-    try {
-      fs.unlinkSync(absolutePath);
-    } catch (error) {
-      console.error(`Erreur lors de la suppression du fichier ${absolutePath}:`, error);
-    }
-  }
-};
 
 const signUp = async (req, res) => {
   try {
@@ -218,10 +187,13 @@ const updateUser = async (req, res) => {
     };
 
     if (avatar) {
-      userData.avatar = `/uploads/${avatar.filename}`;
-      
-      if (user.avatar) {
-        deleteFileIfExists(user.avatar);
+      userData.avatar = avatar.path;
+      userData.avatarPublicId = avatar.filename; 
+      console.log("New avatar uploaded:", avatar.path);
+      console.log("New avatar public ID:", userData.avatarPublicId);
+
+      if (user.avatarPublicId) {
+        await deleteFileIfExists(user.avatarPublicId);
       }
     }
 
@@ -278,7 +250,7 @@ const logout = async (req, res) => {
   }
 };
 
-const getUserByEmail = async (email) => {
+/*const getUserByEmail = async (email) => {
   try {
     if (!email) {
       throw new Error('Email is required');
@@ -289,7 +261,7 @@ const getUserByEmail = async (email) => {
     console.error('Error getting user by email:', error);
     throw error;
   }
-};
+};*/
 
 const handleGoogleAuth = async (req, res, profile) => {  
   try {
@@ -618,8 +590,8 @@ const deleteAccount = async (req, res) => {
       });
     }
 
-    if (user.avatar) {
-      deleteFileIfExists(user.avatar);
+    if (user.avatarPublicId) {
+      await deleteFileFromCloudinary(user.avatarPublicId);
     }
 
     await user.destroy();

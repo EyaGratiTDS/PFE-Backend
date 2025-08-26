@@ -21,11 +21,23 @@ const VCard = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    logoPublicId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     favicon: {
       type: DataTypes.STRING,
       allowNull: true,
     },
+    faviconPublicId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     background_value: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    backgroundPublicId: {
       type: DataTypes.STRING,
       allowNull: true,
     },

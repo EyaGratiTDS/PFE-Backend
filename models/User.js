@@ -112,6 +112,10 @@ const User = sequelize.define('Users', {
     type: DataTypes.STRING,
     allowNull: true
   },
+  avatarPublicId: {
+    type: DataTypes.STRING,
+    allowNull: true
+  }
 }, {
   timestamps: true,
   tableName: 'users',

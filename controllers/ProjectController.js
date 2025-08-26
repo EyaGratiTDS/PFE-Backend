@@ -1,11 +1,10 @@
 const Project = require("../models/Project");
 const { getActiveBlockLimit, getProjectLimits } = require('../middleware/planLimiter');
 const User = require('../models/User');
-const path = require('path');
-const fs = require('fs');
 const VCard = require("../models/Vcard");
 const Subscription = require("../models/Subscription");
 const Plan = require("../models/Plan");
+const { deleteFileIfExists } = require("../services/cloudinary");
 
 const createProject = async (req, res) => {
   try {
@@ -29,7 +28,8 @@ const createProject = async (req, res) => {
      color,
       status: status || 'active',
       userId,
-      logo: logoFile ? `/uploads/${logoFile.filename}` : null
+      logo: logoFile ? logoFile.path : null,         // URL Cloudinary
+      logoPublicId: logoFile ? logoFile.filename : null // Public ID Cloudinary
     };
 
     const newProject = await Project.create({...projectData});
@@ -87,32 +87,26 @@ const updateProject = async (req, res) => {
       userId
     };
 
+    // 📌 Nouveau logo
     if (logoFile) {
-      if (project.logo) {
-        const oldLogoPath = path.join(__dirname, '..', 'public', project.logo);
-        fs.unlink(oldLogoPath, (err) => {
-          if (err) console.error('Error deleting old logo:', err);
-        });
+      if (project.logoPublicId) {
+        await deleteFileIfExists(project.logoPublicId);
       }
-      updateData.logo = `/uploads/${logoFile.filename}`;
-    } else if (removeLogo === 'true') {
-      if (project.logo) {
-        const oldLogoPath = path.join(__dirname, '..', 'public', project.logo);
-        fs.unlink(oldLogoPath, (err) => {
-          if (err) console.error('Error deleting old logo:', err);
-        });
+      updateData.logo = logoFile.path;
+      updateData.logoPublicId = logoFile.filename;
+    }
+    // 📌 Suppression du logo
+    else if (removeLogo === 'true') {
+      if (project.logoPublicId) {
+        await deleteFileIfExists(project.logoPublicId);
       }
       updateData.logo = null;
+      updateData.logoPublicId = null;
     }
 
-    const [updatedRows] = await Project.update(updateData, {
-      where: { id: req.params.id },
-      returning: true
+    await Project.update(updateData, {
+      where: { id: req.params.id }
     });
-
-    if (updatedRows === 0) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
 
     const updatedProject = await Project.findByPk(req.params.id);
 
@@ -127,11 +121,16 @@ const updateProject = async (req, res) => {
   }
 };
 
+
 const deleteProject = async (req, res) => {
   try {
     const project = await Project.findByPk(req.params.id);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
+    }
+
+    if (project.logoPublicId) {
+      await deleteFileIfExists(project.logoPublicId);
     }
 
     await project.destroy();
@@ -141,6 +140,7 @@ const deleteProject = async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
+
 
 const getProjectsByUserId = async (req, res) => {
   try {
@@ -193,13 +193,12 @@ const getVCardsByProject = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
     const enhancedVCards = vcards.map(vcard => ({
       ...vcard.get({ plain: true }),
-      logo: vcard.logo ? `${baseUrl}${vcard.logo}` : null,
-      favicon: vcard.favicon ? `${baseUrl}${vcard.favicon}` : null,
+      logo: vcard.logo || null,
+      favicon: vcard.favicon || null,
       background_value: vcard.background_type === 'custom-image'
-        ? `${baseUrl}${vcard.background_value}`
+        ? vcard.background_value
         : vcard.background_value
     }));
 
@@ -218,6 +217,7 @@ const getVCardsByProject = async (req, res) => {
     });
   }
 };
+
 
 const getAllProjectsWithUser = async (req, res) => {
   try {

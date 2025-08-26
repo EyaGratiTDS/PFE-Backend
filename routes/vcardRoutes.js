@@ -3,7 +3,7 @@ const router = express.Router();
 const vcardController = require("../controllers/vcardController");
 const vcardViewController = require('../controllers/vcardViewController');
 const { checkVCardCreation } = require("../middleware/planLimiter"); 
-const uploadService = require('../services/uploadService');
+const uploadService = require('../services/cloudinary');
 const { requireAuthSuperAdmin } = require('../middleware/authMiddleware');
 
 router.post("/",  checkVCardCreation, vcardController.createVCard);
