@@ -6,14 +6,14 @@ const db = require('../models');
 const User = require('../models/User');
 
 const NOTIFICATION_TYPES = {
-  SECURITY: 'security_update',
+  SECURITY: 'security',
   WELCOME: 'welcome',
   SUBSCRIPTION: {
     EXPIRATION: 'subscription_expiration',
     UPDATE: 'subscription_update',
     NEW: 'new_subscription'
   },
-  VCARD_VIEW: 'vcard_view'
+  VCARD_VIEW: 'feature'
 };
 
 const EXPIRATION_TIMES = {
@@ -149,7 +149,7 @@ const sendPasswordChangeNotification = async (userId) => {
   const notification = await generateSecurityNotification(userId, {
     title: 'Password Changed Successfully',
     message: 'Account password updated. Contact support if unauthorized.',
-    eventType: 'password_changed',
+    eventType: 'security',
     metadata: { changed_at: new Date().toISOString() }
   });
 

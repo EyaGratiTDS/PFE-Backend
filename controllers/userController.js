@@ -26,7 +26,6 @@ const signUp = async (req, res) => {
         message: 'reCAPTCHA validation failed.' 
       });
     }
-
      const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({
