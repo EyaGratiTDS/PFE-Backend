@@ -20,7 +20,7 @@ router.delete('/:pixelId', requireAuth, pixelController.deletePixel);
 router.get('/pixels', requireAuthSuperAdmin, pixelController.getPixels);
 router.get('/user', requireAuth, pixelController.getUserPixels);
 router.get('/:pixelId', requireAuth, pixelController.getPixelById);
-router.get('/vcard/:vcardId', requireAuth, pixelController.getPixelsByVCard);
+router.get('/vcard/:vcardId', pixelController.getPixelsByVCard);
 
 router.get('/:pixelId/track', trackLimiter, pixelController.trackEvent);
 router.post('/:pixelId/track', trackLimiter, pixelController.trackEvent);

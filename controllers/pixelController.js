@@ -74,6 +74,47 @@ const normalizeLanguage = (acceptLanguage) => {
   return acceptLanguage.split(',')[0].split(';')[0].trim();
 };
 
+// Fonction pour mapper les types d'événements vers les valeurs ENUM autorisées
+const mapEventType = (eventType) => {
+  // Types d'événements autorisés dans l'ENUM
+  const validEventTypes = [
+    'view', 'click', 'download', 'share', 'heartbeat', 
+    'mouse_move', 'scroll', 'hover', 'suspicious_activity', 
+    'preference_updated', 'attention_event'
+  ];
+
+  const eventMapping = {
+    'page_visible': 'view',
+    'page_hidden': 'view', 
+    'visibility_change': 'view',
+    'page_load': 'view',
+    'page_unload': 'view',
+    'button_click': 'click',
+    'link_click': 'click',
+    'element_click': 'click',
+    'contact_download': 'download',
+    'vcard_download': 'download',
+    'social_share': 'share',
+    'email_share': 'share',
+    'link_share': 'share',
+    'mouse_movement': 'mouse_move',
+    'scroll_event': 'scroll',
+    'element_hover': 'hover',
+    'suspicious': 'suspicious_activity',
+    'anomaly': 'suspicious_activity',
+    'preference_change': 'preference_updated',
+    'setting_update': 'preference_updated',
+    'attention': 'attention_event',
+    'focus': 'attention_event'
+  };
+  
+  // Retourner la valeur mappée ou la valeur originale si elle est valide
+  const mappedType = eventMapping[eventType] || eventType;
+  
+  // Si le type mappé n'est pas valide, retourner 'view' par défaut
+  return validEventTypes.includes(mappedType) ? mappedType : 'view';
+};
+
 const sendPixelResponse = (res) => {
   const pixel = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
   res.writeHead(200, {
@@ -260,10 +301,7 @@ const getPixelById = async (req, res) => {
 const getPixelsByVCard = async (req, res) => {
   try {
     const { vcardId } = req.params;
-    const userId = req.user.id;
-    
-    // Vérifier que la vCard appartient à l'utilisateur
-    const vcard = await VCard.findOne({ where: { id: vcardId, userId } });
+    const vcard = await VCard.findOne({ where: { id: vcardId } });
     if (!vcard) {
       return res.status(404).json({ 
         success: false,
@@ -271,21 +309,28 @@ const getPixelsByVCard = async (req, res) => {
       });
     }
 
-    // Récupérer les pixels de cette vCard
-    const pixels = await Pixel.findAll({ 
+    // Récupérer le pixel de cette vCard
+    const pixel = await Pixel.findOne({ 
       where: { vcardId }
     });
 
+    if (!pixel) {
+      return res.status(404).json({ 
+        success: false,
+        message: "No pixel found for this vCard" 
+      });
+    }
     res.json({ 
       success: true, 
-      data: pixels.map(p => ({
-        id: p.id,
-        name: p.name,
-        is_active: p.is_active,
-        is_blocked: p.is_blocked,
-        created_at: p.created_at,
-        trackingUrl: `${process.env.API_URL}/pixels/${p.id}/track`,
-      }))
+      data: {
+        id: pixel.id,
+        name: pixel.name,
+        is_active: pixel.is_active,
+        is_blocked: pixel.is_blocked,
+        created_at: pixel.created_at,
+        metaPixelId: pixel.metaPixelId,
+        trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
+      }
     });
   } catch (error) {
     console.error("Get pixels by vCard error:", error);
@@ -321,6 +366,7 @@ const getUserPixels = async (req, res) => {
         is_active: p.is_active,
         is_blocked: p.is_blocked,
         created_at: p.created_at,
+        metaPixelId: p.metaPixelId,
         trackingUrl: `${process.env.API_URL}/pixels/${p.id}/track`
       }))
     });
@@ -408,6 +454,9 @@ const trackEvent = async (req, res) => {
       metadata
     } = data;
 
+    // Mapper le type d'événement vers une valeur ENUM autorisée
+    const mappedEventType = mapEventType(eventType);
+
     // Vérifier si le pixel existe et est actif
     const pixel = await Pixel.findByPk(pixelId);
     if (!pixel || !pixel.is_active || pixel.is_blocked) {
@@ -441,7 +490,7 @@ const trackEvent = async (req, res) => {
 
     // Enregistrer l'événement en base de données
     await EventTracking.create({
-      eventType,
+      eventType: mappedEventType,
       metadata: metaData,
       duration,
       blockId,
@@ -458,7 +507,7 @@ const trackEvent = async (req, res) => {
       source: 'internal_tracking'
     });
 
-    console.log(`Event tracked: ${eventType} for pixel ${pixelId}`);
+    console.log(`Event tracked: ${eventType} -> ${mappedEventType} for pixel ${pixelId}`);
     
     // Retourner le pixel de tracking
     sendPixelResponse(res);
