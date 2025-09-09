@@ -134,7 +134,7 @@ const updateVCard = async (req, res) => {
   const {
     name,
     description,
-    favicon,
+    url,
     remove_branding,
     search_engine_visibility,
     is_share,
@@ -144,7 +144,8 @@ const updateVCard = async (req, res) => {
     background_value,
     font_family,
     font_size,
-    projectId
+    projectId, 
+    
   } = req.body;
 
   const logoFile = req.files['logoFile'] ? req.files['logoFile'][0] : null;
@@ -160,6 +161,7 @@ const updateVCard = async (req, res) => {
     const vcardData = {
       name,
       description,
+      url,
       remove_branding,
       search_engine_visibility,
       is_share,

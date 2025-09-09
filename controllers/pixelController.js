@@ -134,7 +134,7 @@ const sendPixelResponse = (res) => {
 
 const createPixel = async (req, res) => {
   try {
-    const { vcardId, name, userId } = req.body;
+    const { vcardId, name, userId, metaPixelId } = req.body;
     
     // Vérifier que la vCard appartient à l'utilisateur
     const vcard = await VCard.findOne({ where: { id: vcardId, userId } });
@@ -158,7 +158,8 @@ const createPixel = async (req, res) => {
     const pixel = await Pixel.create({
       name: name || `Pixel - ${vcard.name}`,
       vcardId,
-      is_active: true
+      is_active: true,
+      metaPixelId
     });
 
     res.status(201).json({
@@ -169,7 +170,8 @@ const createPixel = async (req, res) => {
         trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
         vcardId: pixel.vcardId,
         is_active: pixel.is_active,
-        created_at: pixel.created_at
+        created_at: pixel.created_at,
+        metaPixelId: pixel.metaPixelId
       }
     });
 
@@ -185,7 +187,7 @@ const createPixel = async (req, res) => {
 const updatePixel = async (req, res) => {
   try {
     const { pixelId } = req.params;
-    const { name, is_active } = req.body;
+    const { name, is_active, metaPixelId } = req.body;
 
     const pixel = await Pixel.findByPk(pixelId, {
       include: [{ model: VCard, as: "VCard" }]
@@ -201,7 +203,8 @@ const updatePixel = async (req, res) => {
     // Mise à jour simple du pixel
     await pixel.update({
       name: name || pixel.name,
-      is_active: typeof is_active === 'boolean' ? is_active : pixel.is_active
+      is_active: typeof is_active === 'boolean' ? is_active : pixel.is_active,
+      metaPixelId: metaPixelId || pixel.metaPixelId
     });
 
     res.json({
@@ -211,7 +214,8 @@ const updatePixel = async (req, res) => {
         name: pixel.name,
         is_active: pixel.is_active,
         trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
-        vcardId: pixel.vcardId
+        vcardId: pixel.vcardId,
+        metaPixelId: pixel.metaPixelId
       }
     });
 
@@ -285,7 +289,8 @@ const getPixelById = async (req, res) => {
         is_blocked: pixel.is_blocked,
         trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
         vcard: pixel.VCard,
-        created_at: pixel.created_at
+        created_at: pixel.created_at,
+        metaPixelId: pixel.metaPixelId
       }
     });
 
@@ -413,6 +418,7 @@ const getPixels = async (req, res) => {
       is_blocked: pixel.is_blocked,
       created_at: pixel.created_at,
       trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
+      metaPixelId: pixel.metaPixelId,
       vcard: pixel.VCard ? {
         id: pixel.VCard.id,
         name: pixel.VCard.name,
