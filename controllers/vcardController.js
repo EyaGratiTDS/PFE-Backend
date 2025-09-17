@@ -158,6 +158,19 @@ const updateVCard = async (req, res) => {
       return res.status(404).json({ message: "VCard not found" });
     }
 
+    // 🔥 VALIDATION DU PROJECT ID
+    let validProjectId = null;
+    if (projectId && projectId !== '0' && projectId !== 0 && projectId !== '') {
+      const Project = require('../models/Project');
+      const project = await Project.findByPk(projectId);
+      if (!project) {
+        return res.status(400).json({ 
+          message: "Invalid projectId: Project not found" 
+        });
+      }
+      validProjectId = projectId;
+    }
+
     const vcardData = {
       name,
       description,
@@ -170,7 +183,7 @@ const updateVCard = async (req, res) => {
       background_type,
       font_family,
       font_size,
-      projectId: projectId || null
+      projectId: validProjectId
     };
 
     if (logoFile) {
@@ -220,28 +233,77 @@ const updateVCard = async (req, res) => {
     }
   } catch (error) {
     console.error("Error updating vCard:", error);
+    
+    // 🔥 GESTION SPÉCIFIQUE DE L'ERREUR DE CLÉ ÉTRANGÈRE
+    if (error.name === "SequelizeForeignKeyConstraintError") {
+      return res.status(400).json({
+        message: "Invalid foreign key reference",
+        details: "The specified projectId does not exist"
+      });
+    }
+    
     res.status(400).json({ message: error.message });
   }
 };
 
 const deleteVCard = async (req, res) => {
+  const sequelize = require('../database/sequelize');
+  const transaction = await sequelize.transaction();
+
   try {
-    const vcard = await VCard.findByPk(req.params.id);
+    const vcard = await VCard.findByPk(req.params.id, {
+      include: [
+        {
+          model: require('../models/Pixel'),
+          as: 'Pixel',
+          include: [
+            {
+              model: require('../models/EventTracking'),
+              as: 'EventTracking'
+            }
+          ]
+        },
+        {
+          model: require('../models/Block'),
+          as: 'Block'
+        },
+        {
+          model: require('../models/VcardView'),
+          as: 'VcardView'
+        }
+      ],
+      transaction
+    });
+
     if (!vcard) {
+      await transaction.rollback();
       return res.status(404).json({ message: "VCard not found" });
     }
 
+    // Supprimer les fichiers Cloudinary avant la suppression
     if (vcard.logoPublicId) await deleteFileIfExists(vcard.logoPublicId);
     if (vcard.faviconPublicId) await deleteFileIfExists(vcard.faviconPublicId);
     if (vcard.backgroundPublicId) await deleteFileIfExists(vcard.backgroundPublicId);
 
-    await VCard.destroy({
-      where: { id: req.params.id },
+    // ✅ Suppression avec cascade automatique via Sequelize dans une transaction
+    await vcard.destroy({ 
+      cascade: true,
+      transaction
     });
 
+    await transaction.commit();
     res.json({ message: "VCard and associated files deleted successfully" });
   } catch (error) {
-    console.error("Error deleting vCard::", error);
+    await transaction.rollback();
+    console.error("Error deleting vCard:", error);
+    
+    if (error.name === "SequelizeForeignKeyConstraintError") {
+      return res.status(400).json({
+        message: "Cannot delete VCard due to foreign key constraints",
+        details: "This VCard has associated data that must be removed first"
+      });
+    }
+    
     res.status(500).json({ message: error.message });
   }
 };

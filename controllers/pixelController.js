@@ -134,7 +134,7 @@ const sendPixelResponse = (res) => {
 
 const createPixel = async (req, res) => {
   try {
-    const { vcardId, name, userId, metaPixelId } = req.body;
+    const { vcardId, name, userId, type, pixelCode } = req.body;
     
     // Vérifier que la vCard appartient à l'utilisateur
     const vcard = await VCard.findOne({ where: { id: vcardId, userId } });
@@ -145,21 +145,23 @@ const createPixel = async (req, res) => {
       });
     }
 
-    // Vérifier qu'un pixel n'existe pas déjà pour cette vCard
-    const existingPixel = await Pixel.findOne({ where: { vcardId } });
-    if (existingPixel) {
-      return res.status(409).json({
+    // Vérifier les types de pixel valides
+    const validTypes = ["meta", "ga", "linkedin", "gtm", "pinterest", "twitter", "quora"];
+    if (type && !validTypes.includes(type)) {
+      return res.status(400).json({
         success: false,
-        message: "A pixel already exists for this vCard"
+        message: `Invalid pixel type. Valid types are: ${validTypes.join(', ')}`
       });
     }
 
     // Créer le pixel
     const pixel = await Pixel.create({
       name: name || `Pixel - ${vcard.name}`,
+      type: type || null,
       vcardId,
+      pixelCode: pixelCode || null,
       is_active: true,
-      metaPixelId
+      is_blocked: false
     });
 
     res.status(201).json({
@@ -167,11 +169,13 @@ const createPixel = async (req, res) => {
       data: {
         id: pixel.id,
         name: pixel.name,
+        type: pixel.type,
+        pixelCode: pixel.pixelCode,
         trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
         vcardId: pixel.vcardId,
         is_active: pixel.is_active,
-        created_at: pixel.created_at,
-        metaPixelId: pixel.metaPixelId
+        is_blocked: pixel.is_blocked,
+        created_at: pixel.created_at
       }
     });
 
@@ -187,7 +191,7 @@ const createPixel = async (req, res) => {
 const updatePixel = async (req, res) => {
   try {
     const { pixelId } = req.params;
-    const { name, is_active, metaPixelId } = req.body;
+    const { name, is_active, type, pixelCode } = req.body;
 
     const pixel = await Pixel.findByPk(pixelId, {
       include: [{ model: VCard, as: "VCard" }]
@@ -200,11 +204,21 @@ const updatePixel = async (req, res) => {
       });
     }
 
-    // Mise à jour simple du pixel
+    // Vérifier les types de pixel valides si fourni
+    const validTypes = ["meta", "ga", "linkedin", "gtm", "pinterest", "twitter", "quora"];
+    if (type && !validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid pixel type. Valid types are: ${validTypes.join(', ')}`
+      });
+    }
+
+    // Mise à jour du pixel
     await pixel.update({
       name: name || pixel.name,
       is_active: typeof is_active === 'boolean' ? is_active : pixel.is_active,
-      metaPixelId: metaPixelId || pixel.metaPixelId
+      type: type !== undefined ? type : pixel.type,
+      pixelCode: pixelCode !== undefined ? pixelCode : pixel.pixelCode
     });
 
     res.json({
@@ -212,10 +226,12 @@ const updatePixel = async (req, res) => {
       data: {
         id: pixel.id,
         name: pixel.name,
+        type: pixel.type,
+        pixelCode: pixel.pixelCode,
         is_active: pixel.is_active,
+        is_blocked: pixel.is_blocked,
         trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
-        vcardId: pixel.vcardId,
-        metaPixelId: pixel.metaPixelId
+        vcardId: pixel.vcardId
       }
     });
 
@@ -285,12 +301,13 @@ const getPixelById = async (req, res) => {
       data: {
         id: pixel.id,
         name: pixel.name,
+        type: pixel.type,
+        pixelCode: pixel.pixelCode,
         is_active: pixel.is_active,
         is_blocked: pixel.is_blocked,
         trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
         vcard: pixel.VCard,
-        created_at: pixel.created_at,
-        metaPixelId: pixel.metaPixelId
+        created_at: pixel.created_at
       }
     });
 
@@ -314,28 +331,32 @@ const getPixelsByVCard = async (req, res) => {
       });
     }
 
-    // Récupérer le pixel de cette vCard
-    const pixel = await Pixel.findOne({ 
+    // Récupérer tous les pixels de cette vCard (il peut y en avoir plusieurs maintenant)
+    const pixels = await Pixel.findAll({ 
       where: { vcardId }
     });
 
-    if (!pixel) {
+    if (!pixels || pixels.length === 0) {
       return res.status(404).json({ 
         success: false,
-        message: "No pixel found for this vCard" 
+        message: "No pixels found for this vCard" 
       });
     }
+
+    const pixelsData = pixels.map(pixel => ({
+      id: pixel.id,
+      name: pixel.name,
+      type: pixel.type,
+      pixelCode: pixel.pixelCode,
+      is_active: pixel.is_active,
+      is_blocked: pixel.is_blocked,
+      created_at: pixel.created_at,
+      trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`
+    }));
+
     res.json({ 
       success: true, 
-      data: {
-        id: pixel.id,
-        name: pixel.name,
-        is_active: pixel.is_active,
-        is_blocked: pixel.is_blocked,
-        created_at: pixel.created_at,
-        metaPixelId: pixel.metaPixelId,
-        trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
-      }
+      data: pixelsData
     });
   } catch (error) {
     console.error("Get pixels by vCard error:", error);
@@ -367,11 +388,12 @@ const getUserPixels = async (req, res) => {
       data: pixels.map(p => ({
         id: p.id,
         name: p.name,
+        type: p.type,
+        pixelCode: p.pixelCode,
         vcard: p.VCard,
         is_active: p.is_active,
         is_blocked: p.is_blocked,
         created_at: p.created_at,
-        metaPixelId: p.metaPixelId,
         trackingUrl: `${process.env.API_URL}/pixels/${p.id}/track`
       }))
     });
@@ -405,6 +427,8 @@ const getPixels = async (req, res) => {
       attributes: [
         'id',
         'name',
+        'type',
+        'pixelCode',
         'is_active',
         'is_blocked',
         'created_at'
@@ -414,11 +438,12 @@ const getPixels = async (req, res) => {
     const formattedPixels = pixels.map(pixel => ({
       id: pixel.id,
       name: pixel.name,
+      type: pixel.type,
+      pixelCode: pixel.pixelCode,
       is_active: pixel.is_active,
       is_blocked: pixel.is_blocked,
       created_at: pixel.created_at,
       trackingUrl: `${process.env.API_URL}/pixels/${pixel.id}/track`,
-      metaPixelId: pixel.metaPixelId,
       vcard: pixel.VCard ? {
         id: pixel.VCard.id,
         name: pixel.VCard.name,
@@ -512,8 +537,6 @@ const trackEvent = async (req, res) => {
       language: primaryLanguage,
       source: 'internal_tracking'
     });
-
-    console.log(`Event tracked: ${eventType} -> ${mappedEventType} for pixel ${pixelId}`);
     
     // Retourner le pixel de tracking
     sendPixelResponse(res);

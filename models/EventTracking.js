@@ -101,7 +101,8 @@ const EventTracking = sequelize.define('EventTracking', {
 EventTracking.associate = models => {
   EventTracking.belongsTo(models.Pixel, {
     foreignKey: 'pixelId',
-    as: 'Pixel'
+    as: 'Pixel',
+    onDelete: 'CASCADE'
   });
 };
 
