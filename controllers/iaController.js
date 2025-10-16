@@ -10,11 +10,7 @@ async function generateProjectLogo(projectName, job) {
   try {
     console.log(`🖼️ Generating logo for: ${projectName}`);
     
-    // Option 1: Logo.dev API (free)
     const logoUrl = `https://img.logo.dev/${encodeURIComponent(projectName.toLowerCase())}.png?token=pk_X8bKfaWxSTSDEy_z6s5Cg&size=200`;
-    
-    // Option 2: If Logo.dev doesn't work, use alternative API
-    // const logoUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(projectName)}&background=random&color=fff&size=200&bold=true`;
     
     // Check if image is accessible
     const response = await axios.head(logoUrl, { timeout: 5000 });
@@ -235,7 +231,7 @@ async function generateVCard(req, res) {
  */
 async function notifyVCardAction(req, res) {
   try {
-    const { action, vcardData, projectData, blocksData, vcardId } = req.body;
+    const { action, vcardData, projectData, blocksData, vcardId, userId } = req.body;
     
     console.log("🎬 User action received:", { 
       action,
@@ -275,8 +271,6 @@ async function notifyVCardAction(req, res) {
         });
       }
 
-      // ✅ Critical userId validation
-      const userId = projectData.userId || vcardData.userId;
       if (!userId) {
         return res.status(400).json({ 
           success: false,
