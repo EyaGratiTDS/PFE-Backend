@@ -1,7 +1,8 @@
-const projectController = require('../../controllers/projectController');
+const projectController = require('../../controllers/ProjectController');
 const Project = require('../../models/Project');
 const User = require('../../models/User');
 const VCard = require('../../models/Vcard');
+const { deleteFileIfExists } = require('../../services/cloudinary');
 const fs = require('fs');
 
 jest.mock('../../models/Project');
@@ -9,6 +10,7 @@ jest.mock('../../models/User');
 jest.mock('../../models/Vcard');
 jest.mock('../../models/Subscription');
 jest.mock('../../models/Plan');
+jest.mock('../../services/cloudinary');
 jest.mock('fs');
 jest.mock('path');
 
@@ -31,6 +33,12 @@ describe('Project Controller', () => {
       json: jest.fn(),
       end: jest.fn()
     };
+
+    // Mock fs.unlink and cloudinary deleteFileIfExists
+    fs.unlink.mockImplementation((path, callback) => {
+      if (callback) callback(null);
+    });
+    deleteFileIfExists.mockImplementation(() => Promise.resolve());
 
     jest.clearAllMocks();
   });
@@ -138,15 +146,17 @@ describe('Project Controller', () => {
 
       const mockProject = {
         id: 1,
-        logo: '/uploads/old-logo.jpg'
+        logo: '/uploads/old-logo.jpg',
+        logoPublicId: 'old-logo-public-id'
       };
       Project.findByPk.mockResolvedValue(mockProject);
       User.findByPk.mockResolvedValue({ id: 1 });
       Project.update.mockResolvedValue([1]);
+      Project.findByPk.mockResolvedValueOnce(mockProject); // for the final fetch
 
       await projectController.updateProject(mockRequest, mockResponse);
 
-      expect(fs.unlink).toHaveBeenCalled();
+      expect(deleteFileIfExists).toHaveBeenCalledWith('old-logo-public-id');
     });
   });
 

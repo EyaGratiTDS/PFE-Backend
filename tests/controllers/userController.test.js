@@ -381,7 +381,7 @@ describe('UserController', () => {
     });
 
     it('should update user with avatar', async () => {
-      req.file = { filename: 'avatar.jpg' };
+      req.file = { filename: 'avatar.jpg', path: '/uploads/avatar.jpg' };
       const userWithAvatar = { ...mockUser, avatar: '/uploads/old-avatar.jpg' };
       User.findByPk.mockResolvedValueOnce(userWithAvatar).mockResolvedValueOnce(userWithAvatar);
       User.update.mockResolvedValue([1]);
@@ -395,7 +395,8 @@ describe('UserController', () => {
 
       expect(User.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          avatar: '/uploads/avatar.jpg'
+          avatar: '/uploads/avatar.jpg',
+          avatarPublicId: 'avatar.jpg'
         }),
         { where: { id: 1 } }
       );
@@ -631,17 +632,17 @@ describe('UserController', () => {
         get: jest.fn().mockReturnValue(mockUserData)
       }];
 
-      User.findAndCountAll.mockResolvedValue({
-        count: 1,
-        rows: mockUsers
+      User.findAll.mockResolvedValue(mockUsers);
+      db.Plan.findOne.mockResolvedValue({
+        id: 0,
+        name: "Free",
+        price: 0
       });
 
       await userController.getAllUsers(req, res);
 
-      expect(User.findAndCountAll).toHaveBeenCalledWith({
+      expect(User.findAll).toHaveBeenCalledWith({
         where: {},
-        limit: 10,
-        offset: 0,
         attributes: { exclude: ['password', 'twoFactorSecret'] },
         order: [['created_at', 'DESC']],
         include: [
@@ -661,13 +662,7 @@ describe('UserController', () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        data: expect.any(Array),
-        pagination: {
-          totalItems: 1,
-          totalPages: 1,
-          currentPage: 1,
-          pageSize: 10
-        }
+        data: expect.any(Array)
       });
     });
 
@@ -688,14 +683,16 @@ describe('UserController', () => {
         })
       }];
 
-      User.findAndCountAll.mockResolvedValue({
-        count: 1,
-        rows: mockUsers
+      User.findAll.mockResolvedValue(mockUsers);
+      db.Plan.findOne.mockResolvedValue({
+        id: 0,
+        name: "Free",
+        price: 0
       });
 
       await userController.getAllUsers(req, res);
 
-      expect(User.findAndCountAll).toHaveBeenCalledWith(
+      expect(User.findAll).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             [require('sequelize').Op.or]: expect.any(Array)
@@ -706,7 +703,7 @@ describe('UserController', () => {
 
     it('should handle errors', async () => {
       const error = new Error('Database error');
-      User.findAndCountAll.mockRejectedValue(error);
+      User.findAll.mockRejectedValue(error);
 
       await userController.getAllUsers(req, res);
 

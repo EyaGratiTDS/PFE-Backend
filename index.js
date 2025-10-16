@@ -33,7 +33,8 @@ const routes = {
   customDomain: require('./routes/customDomainRoutes'),
   quotes: require('./routes/quoteRoutes'),
   visitor: require('./routes/visitorRoutes'),
-  webNotifications: require('./routes/webNotificationRoutes')
+  webNotifications: require('./routes/webNotificationRoutes'),
+  ia: require('./routes/iaRoutes') // ✅ Ajout des routes IA
 };
 
 const app = express();
@@ -87,6 +88,7 @@ app.use('/custom-domain', routes.customDomain);
 app.use('/quotes', routes.quotes);
 app.use('/visitor', routes.visitor);
 app.use('/web-notifications', routes.webNotifications);
+app.use('/ia', routes.ia); // ✅ Routes IA
 
 // Refresh token endpoint
 app.post('/auth/refresh-token', async (req, res) => {

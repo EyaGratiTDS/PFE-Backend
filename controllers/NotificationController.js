@@ -29,6 +29,7 @@ const createNotification = async (userId, config) => {
     expiresAt: new Date(Date.now() + (config.expiresIn || EXPIRATION_TIMES.STANDARD)),
     ...config
   });
+  
 
   return { ...notification.get({ plain: true }), created_at: notification.created_at };
 };

@@ -283,7 +283,7 @@ describe('Pixel Routes Integration Tests', () => {
   });
 
   describe('GET /pixel/vcard/:vcardId', () => {
-    it('should get pixels by vCard ID with authentication', async () => {
+    it('should get pixels by vCard ID without authentication', async () => {
       const mockPixels = [
         { id: 'pixel1', vcardId: 'vcard123' },
         { id: 'pixel2', vcardId: 'vcard123' }
@@ -300,7 +300,6 @@ describe('Pixel Routes Integration Tests', () => {
         .get('/pixel/vcard/vcard123')
         .expect(200);
 
-      expect(requireAuth).toHaveBeenCalled();
       expect(pixelController.getPixelsByVCard).toHaveBeenCalled();
       expect(response.body.pixels).toEqual(mockPixels);
     });

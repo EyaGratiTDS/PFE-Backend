@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 
 const mockUser = {
-  findByPk: jest.fn()
+  findByPk: jest.fn(),
+  findById: jest.fn()
 };
 
 jest.mock('../../models/User', () => mockUser);
@@ -57,7 +58,7 @@ describe('AuthMiddleware', () => {
   describe('requireAuth', () => {
     test('should authenticate with valid JWT token in headers', async () => {
       const userData = createTestUser();
-      mockUser.findByPk.mockResolvedValue(userData);
+      mockUser.findById.mockResolvedValue(userData);
       
       const token = createTestToken({ 
         id: userData.id, 
@@ -68,7 +69,7 @@ describe('AuthMiddleware', () => {
 
       await requireAuth(req, res, next);
 
-      expect(mockUser.findByPk).toHaveBeenCalledWith(userData.id);
+      expect(mockUser.findById).toHaveBeenCalledWith(userData.id);
       expect(next).toHaveBeenCalledWith();
       expect(req.user).toBeDefined();
       expect(req.user.id).toBe(userData.id);
@@ -80,7 +81,7 @@ describe('AuthMiddleware', () => {
 
     test('should authenticate with valid JWT token in cookies', async () => {
       const userData = createTestUser();
-      mockUser.findByPk.mockResolvedValue(userData);
+      mockUser.findById.mockResolvedValue(userData);
       
       const token = createTestToken({ 
         id: userData.id, 
@@ -91,7 +92,7 @@ describe('AuthMiddleware', () => {
 
       await requireAuth(req, res, next);
 
-      expect(mockUser.findByPk).toHaveBeenCalledWith(userData.id);
+      expect(mockUser.findById).toHaveBeenCalledWith(userData.id);
       expect(next).toHaveBeenCalledWith();
       expect(req.user).toBeDefined();
       expect(req.user.id).toBe(userData.id);
@@ -144,11 +145,11 @@ describe('AuthMiddleware', () => {
       const token = createTestToken({ id: 999, email: 'nonexistent@example.com' });
       req.headers.authorization = `Bearer ${token}`;
       
-      mockUser.findByPk.mockResolvedValue(null);
+      mockUser.findById.mockResolvedValue(null);
 
       await requireAuth(req, res, next);
 
-      expect(mockUser.findByPk).toHaveBeenCalledWith(999);
+      expect(mockUser.findById).toHaveBeenCalledWith(999);
       expect(res.status).toHaveBeenCalledWith(401);
       expect(res.json).toHaveBeenCalledWith({
         message: 'Utilisateur non trouvé'
@@ -158,7 +159,7 @@ describe('AuthMiddleware', () => {
 
     test('should include correct authInfo', async () => {
       const userData = createTestUser({ isAdmin: true });
-      mockUser.findByPk.mockResolvedValue(userData);
+      mockUser.findById.mockResolvedValue(userData);
       
       const token = createTestToken({ 
         id: userData.id, 
@@ -182,7 +183,7 @@ describe('AuthMiddleware', () => {
 
     test('should use connection.remoteAddress when x-forwarded-for is not present', async () => {
       const userData = createTestUser();
-      mockUser.findByPk.mockResolvedValue(userData);
+      mockUser.findById.mockResolvedValue(userData);
       
       const token = createTestToken({ 
         id: userData.id, 

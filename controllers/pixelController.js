@@ -59,7 +59,6 @@ const getLocationData = async (ip) => {
       ip
     };
   } catch (error) {
-    console.error(error.message);
     return { 
       country: null, 
       region: null, 

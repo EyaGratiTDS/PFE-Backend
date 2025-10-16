@@ -30,7 +30,7 @@ const createVCard = async (req, res) => {
       description: description || null,
       url: uniqueUrl,
       userId,
-      is_active: false,
+      is_active: true,  // 🟢 VCard automatiquement active lors de la création
       is_share: false,
       is_downloaded: false
     });

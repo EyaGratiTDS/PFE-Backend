@@ -18,7 +18,7 @@ const Project = sequelize.define(
       allowNull: true,
     },
     logo: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     logoPublicId: {

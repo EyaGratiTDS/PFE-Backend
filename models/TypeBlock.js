@@ -18,3 +18,4 @@ const TypeBlock = sequelize.define('TypeBlock', {
 });
 
 module.exports = TypeBlock;
+

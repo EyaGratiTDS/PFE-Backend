@@ -14,11 +14,11 @@ const VCard = sequelize.define(
       allowNull: false,
     },
     description: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     logo: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     logoPublicId: {
@@ -26,7 +26,7 @@ const VCard = sequelize.define(
       allowNull: true,
     },
     favicon: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     faviconPublicId: {
@@ -34,7 +34,7 @@ const VCard = sequelize.define(
       allowNull: true,
     },
     background_value: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     backgroundPublicId: {
@@ -75,7 +75,7 @@ const VCard = sequelize.define(
     },
     is_active: {
       type: DataTypes.BOOLEAN,
-      defaultValue: false,
+      defaultValue: true,  // 🟢 VCard active par défaut lors de la génération
     },
     status: {
       type: DataTypes.BOOLEAN,

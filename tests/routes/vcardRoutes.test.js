@@ -25,7 +25,7 @@ jest.mock('../../middleware/authMiddleware', () => ({
   requireAuthSuperAdmin: jest.fn((req, res, next) => next())
 }));
 
-jest.mock('../../services/uploadService', () => ({
+jest.mock('../../services/cloudinary', () => ({
   upload: {
     fields: jest.fn(() => (req, res, next) => {
       req.files = {
@@ -41,7 +41,7 @@ jest.mock('../../services/uploadService', () => ({
 const vcardController = require('../../controllers/vcardController');
 const vcardViewController = require('../../controllers/vcardViewController');
 const { checkVCardCreation } = require('../../middleware/planLimiter');
-const uploadService = require('../../services/uploadService');
+const uploadService = require('../../services/cloudinary');
 const { requireAuthSuperAdmin } = require('../../middleware/authMiddleware');
 
 const vcardRoutes = require('../../routes/vcardRoutes');

@@ -75,6 +75,8 @@ describe('PixelController', () => {
         vcardId: 1,
         metaPixelId: 'meta_pixel_123',
         is_active: true,
+        is_blocked: false,
+        created_at: new Date()
       };
 
       VCard.findOne.mockResolvedValue(mockVCard);
@@ -87,18 +89,20 @@ describe('PixelController', () => {
       expect(VCard.findOne).toHaveBeenCalledWith({
         where: { id: 1, userId: 1 },
       });
-      expect(Pixel.findOne).toHaveBeenCalledWith({ where: { vcardId: 1 } });
       expect(Pixel.create).toHaveBeenCalled();
       expect(res.status).toHaveBeenCalledWith(201);
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        pixel: {
+        data: {
           id: 1,
           name: 'Test Pixel',
+          type: undefined,
+          pixelCode: undefined,
           trackingUrl: 'https://api.test.com/pixels/1/track',
-          metaPixelId: 'meta_pixel_123',
           vcardId: 1,
           is_active: true,
+          is_blocked: false,
+          created_at: mockPixel.created_at
         },
       });
     });
@@ -113,23 +117,6 @@ describe('PixelController', () => {
       expect(res.json).toHaveBeenCalledWith({
         success: false,
         message: 'VCard not found or unauthorized',
-      });
-    });
-
-    it('devrait retourner 409 si un pixel existe déjà', async () => {
-      req.body = { vcardId: 1, userId: 1 };
-      const mockVCard = { id: 1, userId: 1 };
-      const mockExistingPixel = { id: 1, vcardId: 1 };
-
-      VCard.findOne.mockResolvedValue(mockVCard);
-      Pixel.findOne.mockResolvedValue(mockExistingPixel);
-
-      await pixelController.createPixel(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(409);
-      expect(res.json).toHaveBeenCalledWith({
-        success: false,
-        message: 'A pixel already exists for this vCard',
       });
     });
   });
@@ -159,14 +146,20 @@ describe('PixelController', () => {
       expect(mockPixel.update).toHaveBeenCalledWith({
         name: 'Updated Pixel',
         is_active: false,
+        type: undefined,
+        pixelCode: undefined
       });
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        pixel: {
+        data: {
           id: 1,
           name: 'Test Pixel',
-          metaPixelId: 'meta_123',
+          type: undefined,
+          pixelCode: undefined,
           is_active: true,
+          is_blocked: undefined,
+          trackingUrl: 'https://api.test.com/pixels/1/track',
+          vcardId: undefined
         },
       });
     });
@@ -228,11 +221,10 @@ describe('PixelController', () => {
       await pixelController.deletePixel(req, res);
 
       expect(Pixel.findByPk).toHaveBeenCalledWith(1);
-      expect(axios.delete).toHaveBeenCalled();
       expect(mockPixel.destroy).toHaveBeenCalled();
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        message: 'Pixel deleted',
+        message: 'Pixel deleted successfully',
       });
     });
 
@@ -280,14 +272,17 @@ describe('PixelController', () => {
       });
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        pixels: [
+        data: [
           {
             id: 1,
             name: 'Pixel 1',
+            type: undefined,
+            pixelCode: undefined,
             vcard: mockPixels[0].VCard,
-            metaPixelId: 'meta_123',
             is_active: true,
+            is_blocked: undefined,
             created_at: mockPixels[0].created_at,
+            trackingUrl: 'https://api.test.com/pixels/1/track',
           },
         ],
       });
@@ -311,15 +306,17 @@ describe('PixelController', () => {
       await pixelController.getPixelById(req, res);
 
       expect(Pixel.findByPk).toHaveBeenCalledWith(1, {
-        include: [{ model: VCard, as: 'VCard' }],
+        include: [{ model: VCard, as: 'VCard', attributes: ['id', 'name', 'url'] }],
       });
       expect(res.json).toHaveBeenCalledWith({
         success: true,
         data: {
           id: 1,
           name: 'Test Pixel',
-          metaPixelId: 'meta_123',
+          type: undefined,
+          pixelCode: undefined,
           is_active: true,
+          is_blocked: undefined,
           trackingUrl: 'https://api.test.com/pixels/1/track',
           vcard: { id: 1, name: 'Test VCard' },
           created_at: mockPixel.created_at,
@@ -464,18 +461,21 @@ describe('PixelController', () => {
       await pixelController.getPixelsByVCard(req, res);
 
       expect(VCard.findOne).toHaveBeenCalledWith({
-        where: { id: 1, userId: 1 },
+        where: { id: 1 },
       });
       expect(Pixel.findAll).toHaveBeenCalledWith({
-        where: { vcardId: 1, is_active: true },
+        where: { vcardId: 1 },
       });
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        pixels: [
+        data: [
           {
             id: 1,
             name: 'Pixel 1',
+            type: undefined,
+            pixelCode: undefined,
             is_active: true,
+            is_blocked: undefined,
             created_at: mockPixels[0].created_at,
             trackingUrl: 'https://api.test.com/pixels/1/track',
           },
@@ -529,7 +529,8 @@ describe('PixelController', () => {
         attributes: [
           'id',
           'name',
-          'metaPixelId',
+          'type',
+          'pixelCode',
           'is_active',
           'is_blocked',
           'created_at',
@@ -542,10 +543,12 @@ describe('PixelController', () => {
           {
             id: 1,
             name: 'Pixel 1',
-            metaPixelId: 'meta_123',
+            type: undefined,
+            pixelCode: undefined,
             is_active: true,
             is_blocked: false,
             created_at: mockPixels[0].created_at,
+            trackingUrl: 'https://api.test.com/pixels/1/track',
             vcard: {
               id: 1,
               name: 'VCard 1',

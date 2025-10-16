@@ -70,7 +70,7 @@ jest.mock('../../middleware/authMiddleware', () => ({
   }
 }));
 
-jest.mock('../../services/uploadService', () => ({
+jest.mock('../../services/cloudinary', () => ({
   upload: {
     single: jest.fn(() => (req, res, next) => {
       if (req.body.hasFile) {
