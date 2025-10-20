@@ -12,17 +12,6 @@ const CLOUDINARY_CONFIG = {
   upload_preset: process.env.CLOUDINARY_UPLOAD_PRESET || 'unsigned_preset'
 };
 
-/**
- * 🚀 AI Service for VCard Generation - OPTIMIZED VERSION
- * 
- * OPTIMIZATIONS:
- * ✅ Removed duplicate code
- * ✅ Reorganized functions
- * ✅ Performance improvements
- * ✅ Cleaned obsolete functions
- * ✅ Preserved all functionalities
- */
-
 // API key verification
 if (!API_KEY) {
   console.warn("⚠️ OPENROUTER_API_KEY missing in .env - Fallback mode activated");
