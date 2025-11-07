@@ -109,6 +109,13 @@ const getResourceLimits = async (userId, resourceConfig) => {
 const checkResourceCreation = (getLimitFunction, resourceName) =>
   async (req, res, next) => {
     try {
+      if (!req.user || !req.user.id) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          details: 'User not authenticated'
+        });
+      }
+
       const mockRes = {
         locals: {},
         statusCode: 200,
@@ -187,6 +194,13 @@ const limitConfigs = {
 
 const getLimitsHandler = (resourceType) => async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        error: 'Authentication required',
+        details: 'User not authenticated'
+      });
+    }
+
     const config = limitConfigs[resourceType];
     const result = await getResourceLimits(req.user.id, config);
 
@@ -250,6 +264,13 @@ module.exports = {
   getActiveCustomDomainLimit: getActiveResourceLimit(getLimitsHandler('customDomain'), 1),
   get2FAAccess: async (req, res) => {
     try {
+      if (!req.user || !req.user.id) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          details: 'User not authenticated'
+        });
+      }
+
       const plan = await getCurrentPlan(req.user.id);
       const has2FA = parsePlanFeatures(plan).some(f =>
         f.toLowerCase().includes('password protection') ||

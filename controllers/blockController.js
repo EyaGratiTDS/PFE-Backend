@@ -1,7 +1,7 @@
 const Block = require("../models/Block");
 const VCard = require("../models/Vcard");
 const { Op } = require("sequelize");
-const { getBlocksLimits } = require('../middleware/planLimiter');
+const { getBlocksLimits, getActiveBlockLimit } = require('../middleware/planLimiter');
 
 const VALID_BLOCK_TYPES = new Set([
   'Link', 'Email', 'Address', 'Phone', 'Facebook',
@@ -87,7 +87,8 @@ const getBlocksByVcardId = async (req, res) => {
     }
 
     const [blocks, maxActive] = await Promise.all([
-      Block.findAll({ where: { vcardId }, order: [['createdAt', 'ASC']] })
+      Block.findAll({ where: { vcardId }, order: [['createdAt', 'ASC']] }),
+      getActiveBlockLimit(vcard.userId)
     ]);
 
     const result = blocks.map((block, index) => ({
@@ -106,9 +107,18 @@ const getBlocksByVcardIdAdmin = async (req, res) => {
     const { vcardId } = req.query;
     if (!vcardId) return sendErrorResponse(res, 400, ERROR_RESPONSES.missingVcardId);
 
+    // Récupérer la VCard pour vérifier qu'elle existe et obtenir le userId
+    const vcard = await VCard.findByPk(vcardId, {
+      attributes: ['id', 'name', 'userId']
+    });
+
+    if (!vcard) {
+      return sendErrorResponse(res, 404, { error: 'VCard not found' });
+    }
+
     const [blocks, maxActive] = await Promise.all([
       Block.findAll({ where: { vcardId, status: true }, order: [['createdAt', 'ASC']] }),
-      getActiveBlockLimit(req.user.id, vcardId)
+      getActiveBlockLimit(vcard.userId)
     ]);
 
     const result = blocks.map((block, index) => ({
