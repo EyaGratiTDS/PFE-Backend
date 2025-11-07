@@ -323,6 +323,7 @@ const getPixelsByVCard = async (req, res) => {
   try {
     const { vcardId } = req.params;
     const vcard = await VCard.findOne({ where: { id: vcardId } });
+    console.log("VCard found:", vcard);
     if (!vcard) {
       return res.status(404).json({ 
         success: false,
@@ -334,13 +335,7 @@ const getPixelsByVCard = async (req, res) => {
     const pixels = await Pixel.findAll({ 
       where: { vcardId }
     });
-
-    if (!pixels || pixels.length === 0) {
-      return res.status(404).json({ 
-        success: false,
-        message: "No pixels found for this vCard" 
-      });
-    }
+    console.log("Pixels found:", pixels);
 
     const pixelsData = pixels.map(pixel => ({
       id: pixel.id,
