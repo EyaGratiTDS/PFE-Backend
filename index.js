@@ -73,7 +73,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use('/users', routes.user);
 app.use('/auth', routes.auth);
 app.use('/password', routes.password);
-app.use('/vcard', requireAuth, routes.vcard);
+app.use('/vcard', routes.vcard);
 app.use('/block', requireAuth, routes.block);
 app.use('/activity-logs', routes.activityLogs);
 app.use('/apiKey', requireAuth, routes.apiKey);

@@ -6,10 +6,10 @@ const { checkVCardCreation } = require("../middleware/planLimiter");
 const uploadService = require('../services/cloudinary');
 const { requireAuthSuperAdmin } = require('../middleware/authMiddleware');
 
-router.post("/",  checkVCardCreation, vcardController.createVCard);
-router.get("/", vcardController.getVCardsByUserId);
-router.get("/:id", vcardController.getVCardById);
-router.delete('/delete-logo',  vcardController.deleteLogo);
+router.post("/", requireAuth, checkVCardCreation, vcardController.createVCard);
+router.get("/", requireAuth, vcardController.getVCardsByUserId);
+router.get("/:id", requireAuth, vcardController.getVCardById);
+router.delete('/delete-logo', requireAuth, vcardController.deleteLogo);
 router.get('/admin/vcards-with-users', requireAuthSuperAdmin, vcardController.getAllVCardsWithUsers);
 
 router.put("/:id", uploadService.upload.fields([
@@ -18,7 +18,7 @@ router.put("/:id", uploadService.upload.fields([
   { name: 'faviconFile', maxCount: 1 }
 ]), vcardController.updateVCard);
 
-router.delete("/:id",  vcardController.deleteVCard);
+router.delete("/:id", requireAuth, vcardController.deleteVCard);
 router.get("/url/:url", vcardController.getVCardByUrl);
 router.post('/:id/views', vcardViewController.registerView);
 router.put('/:id/toggle-status', requireAuthSuperAdmin, vcardController.toggleVCardStatus);
