@@ -8,7 +8,7 @@ const { checkProjectCreation } = require('../middleware/planLimiter');
 router.post('/', requireAuth, uploadService.upload.single('logoFile'), checkProjectCreation, projectController.createProject);
 router.get('/user', requireAuth, projectController.getProjectsByUserId);
 router.get('/projects-with-users', requireAuthSuperAdmin, projectController.getAllProjectsWithUser);
-router.get('/:id', requireAuth, projectController.getProjectById);
+router.get('/:id', projectController.getProjectById);
 router.put('/:id', requireAuth,uploadService.upload.single('logoFile'), projectController.updateProject);
 router.delete('/:id', requireAuth, projectController.deleteProject);
 router.get('/:id/vcards', requireAuth, projectController.getVCardsByProject);

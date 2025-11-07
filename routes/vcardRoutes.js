@@ -5,6 +5,7 @@ const vcardViewController = require('../controllers/vcardViewController');
 const { checkVCardCreation } = require("../middleware/planLimiter"); 
 const uploadService = require('../services/cloudinary');
 const { requireAuthSuperAdmin } = require('../middleware/authMiddleware');
+const { requireAuth } = require('../middleware/authMiddleware');
 
 router.post("/", requireAuth, checkVCardCreation, vcardController.createVCard);
 router.get("/", requireAuth, vcardController.getVCardsByUserId);
