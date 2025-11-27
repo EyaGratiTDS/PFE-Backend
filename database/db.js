@@ -7,7 +7,7 @@ const config = {
   user: process.env.USER,
   password: process.env.PASSWORD,
   database: process.env.DATABASE,
-  port: 35499,
+  port: 25904,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
